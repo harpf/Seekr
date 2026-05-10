@@ -7,13 +7,24 @@
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body>
+  <body data-page="search">
+    <nav class="topbar">
+      <div class="topbar-inner container">
+        <a class="brand" href="/">Document Search</a>
+        <div class="nav-links">
+          <a href="/">Dashboard</a><a href="/search">Search</a><a href="/ingest">Ingest</a><a href="/config">Config</a>
+        </div>
+      </div>
+    </nav>
+
     <main class="container">
-      <header class="card"><h1>Search Documents</h1><a class="btn btn-secondary" href="/">Back to Home</a></header>
+      <header class="card"><h1>Search Documents</h1></header>
       <section class="card">
-        <h2>Login</h2><div class="grid-2"><label>Username<input id="username" value="admin" /></label><label>Password<input id="password" type="password" /></label></div><button class="btn" onclick="login()">Login</button><p id="loginResult" class="status"></p>
+        <h2>Login</h2>
+        <div class="form-grid"><label>Username<input id="username" value="admin" /></label><label>Password<input id="password" type="password" /></label></div>
+        <button class="btn" onclick="login()">Login</button><p id="loginResult" class="status"></p>
       </section>
-      <section id="appPanel" class="card hidden"><h2>Search Filters</h2><input id="query" placeholder="wartung AND anlage"/><input id="filetype" placeholder="pdf/docx/pptx/txt"/><input id="pathFilter" placeholder="/documents/customer"/><input id="blockType" placeholder="page/paragraph/table/slide"/><input id="modifiedFrom" placeholder="2026-01-01T00:00:00+00:00"/><input id="modifiedTo" placeholder="2026-12-31T23:59:59+00:00"/><button class="btn" onclick="runSearch()">Search</button><div id="results"></div></section>
+      <section id="appPanel" class="card hidden"><h2>Search Filters</h2><div class="form-grid"><input id="query" placeholder="wartung AND anlage"/><input id="filetype" placeholder="pdf/docx/pptx/txt"/><input id="pathFilter" placeholder="/documents/customer"/><input id="blockType" placeholder="page/paragraph/table/slide"/><input id="modifiedFrom" placeholder="2026-01-01T00:00:00+00:00"/><input id="modifiedTo" placeholder="2026-12-31T23:59:59+00:00"/></div><button class="btn" onclick="runSearch()">Search</button><div id="results"></div></section>
     </main>
     <script src="/static/app.js"></script>
   </body>

@@ -7,16 +7,28 @@
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body>
+  <body data-page="home">
+    <nav class="topbar">
+      <div class="topbar-inner container">
+        <a class="brand" href="/">Document Search</a>
+        <div class="nav-links">
+          <a href="/">Dashboard</a>
+          <a href="/search">Search</a>
+          <a href="/ingest">Ingest</a>
+          <a href="/config">Config</a>
+        </div>
+      </div>
+    </nav>
+
     <main class="container">
       <header class="hero card">
-        <h1>Document Search</h1>
-        <p class="muted">A document intelligence workspace with dedicated pages for each task.</p>
+        <h1>Willkommen</h1>
+        <p id="welcomeText" class="muted">Bitte melde dich an, um Statistiken und Funktionen zu sehen.</p>
       </header>
 
       <section class="card">
         <h2>Login</h2>
-        <div class="grid-2">
+        <div class="form-grid">
           <label>Username<input id="username" placeholder="username" value="admin" /></label>
           <label>Password<input id="password" type="password" placeholder="password" /></label>
         </div>
@@ -24,12 +36,12 @@
         <p id="loginResult" class="status"></p>
       </section>
 
-      <section id="appPanel" class="card hidden">
-        <h2>Go to</h2>
-        <div class="grid-3">
-          <a class="nav-card" href="/search">Search Documents</a>
-          <a class="nav-card" href="/ingest">Upload & Index</a>
-          <a class="nav-card" href="/config">Configuration</a>
+      <section id="statusPanel" class="card hidden">
+        <h2>Systemstatistik</h2>
+        <div class="stats-grid">
+          <article class="stat-box"><span>Dateien eingelesen</span><strong id="statDocuments">0</strong></article>
+          <article class="stat-box"><span>Crawler-Blöcke verarbeitet</span><strong id="statBlocks">0</strong></article>
+          <article class="stat-box"><span>Speicherbedarf</span><strong id="statStorage">0 MB</strong></article>
         </div>
       </section>
     </main>

@@ -7,15 +7,14 @@
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body>
+  <body data-page="ingest">
+    <nav class="topbar"><div class="topbar-inner container"><a class="brand" href="/">Document Search</a><div class="nav-links"><a href="/">Dashboard</a><a href="/search">Search</a><a href="/ingest">Ingest</a><a href="/config">Config</a></div></div></nav>
     <main class="container">
-      <header class="card"><h1>Upload & Index</h1><a class="btn btn-secondary" href="/">Back to Home</a></header>
-      <section class="card">
-        <h2>Login</h2><div class="grid-2"><label>Username<input id="username" value="admin" /></label><label>Password<input id="password" type="password" /></label></div><button class="btn" onclick="login()">Login</button><p id="loginResult" class="status"></p>
-      </section>
+      <header class="card"><h1>Upload & Index</h1></header>
+      <section class="card"><h2>Login</h2><div class="form-grid"><label>Username<input id="username" value="admin" /></label><label>Password<input id="password" type="password" /></label></div><button class="btn" onclick="login()">Login</button><p id="loginResult" class="status"></p></section>
       <section id="appPanel" class="hidden">
-        <section class="card"><h2>Upload Document</h2><input id="uploadFile" type="file"/><input id="uploadPath" placeholder="incoming/2026"/><input id="uploadTags" placeholder="invoice,customer-a"/><textarea id="uploadMeta" placeholder='{"customer":"ACME","doc_type":"invoice"}'></textarea><button class="btn" onclick="uploadDocument()">Upload</button><pre id="uploadResult"></pre></section>
-        <section class="card"><h2>Index Documents</h2><input id="paths" placeholder="/documents"/><button class="btn" onclick="startIndex()">Start Async Index</button><pre id="indexResult"></pre></section>
+        <section class="card"><h2>Upload Document</h2><div class="form-grid"><input id="uploadFile" type="file"/><input id="uploadPath" placeholder="incoming/2026"/><input id="uploadTags" placeholder="invoice,customer-a"/><textarea id="uploadMeta" placeholder='{"customer":"ACME","doc_type":"invoice"}'></textarea></div><button class="btn" onclick="uploadDocument()">Upload</button><pre id="uploadResult"></pre></section>
+        <section class="card"><h2>Index Documents</h2><div class="form-grid"><input id="paths" placeholder="/documents"/></div><button class="btn" onclick="startIndex()">Start Async Index</button><pre id="indexResult"></pre></section>
         <section class="card"><h2>System Update</h2><button class="btn" onclick="runUpdate()">Run Update</button><pre id="updateResult"></pre></section>
       </section>
     </main>

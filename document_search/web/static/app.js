@@ -2,9 +2,7 @@ let token = localStorage.getItem('documentSearchToken');
 
 async function api(path, method = 'GET', body = null) {
   const headers = { 'X-Auth-Token': token ?? '' };
-  if (body !== null) {
-    headers['Content-Type'] = 'application/json';
-  }
+  if (body !== null) headers['Content-Type'] = 'application/json';
   const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : null });
   if (!res.ok) {
     const text = await res.text();
@@ -23,6 +21,23 @@ function setText(id, message, isError = false) {
 function showAuthedPanels() {
   document.getElementById('appPanel')?.classList.remove('hidden');
   document.getElementById('configPanel')?.classList.remove('hidden');
+  document.getElementById('statusPanel')?.classList.remove('hidden');
+}
+
+function formatBytes(bytes) {
+  const size = Number(bytes || 0);
+  if (size <= 0) return '0 MB';
+  return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+async function loadStatus() {
+  try {
+    const status = await api('/api/status');
+    document.getElementById('welcomeText') && (document.getElementById('welcomeText').textContent = 'Du bist angemeldet. Hier ist der aktuelle Verarbeitungsstatus.');
+    document.getElementById('statDocuments') && (document.getElementById('statDocuments').textContent = String(status.documents ?? 0));
+    document.getElementById('statBlocks') && (document.getElementById('statBlocks').textContent = String(status.content_blocks ?? 0));
+    document.getElementById('statStorage') && (document.getElementById('statStorage').textContent = formatBytes(status.total_file_size_bytes ?? 0));
+  } catch (_) {}
 }
 
 async function login(options = { redirectToApp: true }) {
@@ -32,9 +47,8 @@ async function login(options = { redirectToApp: true }) {
     localStorage.setItem('documentSearchToken', token);
     setText('loginResult', `Logged in as ${data.username}`);
     showAuthedPanels();
-    if (options.redirectToApp === false && document.getElementById('configPanel')) {
-      await loadConfig();
-    }
+    await loadStatus();
+    if (options.redirectToApp === false && document.getElementById('configPanel')) await loadConfig();
   } catch (error) {
     setText('loginResult', `Login failed: ${error.message}`, true);
   }
@@ -64,9 +78,7 @@ async function loadConfig(){
     cfgExcludePatterns.value = (c.exclude_patterns || []).join(',');
     cfgMaxSize.value = c.max_file_size_mb ?? 100;
     configResult.textContent = 'Loaded config';
-  } catch (e) {
-    configResult.textContent = e.message;
-  }
+  } catch (e) { configResult.textContent = e.message; }
 }
 
 async function saveConfig(){
@@ -92,4 +104,21 @@ async function uploadDocument(){
 
 async function runUpdate(){ try { const res = await api('/api/update/run','POST',{}); updateResult.textContent = JSON.stringify(res,null,2);} catch(e){updateResult.textContent=e.message;} }
 
-showAuthedPanels();
+function initNav() {
+  const map = { home: '/', search: '/search', ingest: '/ingest', config: '/config' };
+  const activeHref = map[document.body?.dataset?.page || ''];
+  document.querySelectorAll('.nav-links a').forEach((link) => {
+    if (link.getAttribute('href') === activeHref) link.classList.add('active');
+  });
+}
+
+async function bootstrap() {
+  initNav();
+  if (token) {
+    showAuthedPanels();
+    await loadStatus();
+    if (document.getElementById('configPanel')) await loadConfig();
+  }
+}
+
+bootstrap();
