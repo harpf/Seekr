@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Search · Document Search</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="card"><h1>Search Documents</h1><a class="btn btn-secondary" href="/">Back to Home</a></header>
+      <section class="card">
+        <h2>Login</h2><div class="grid-2"><label>Username<input id="username" value="admin" /></label><label>Password<input id="password" type="password" /></label></div><button class="btn" onclick="login()">Login</button><p id="loginResult" class="status"></p>
+      </section>
+      <section id="appPanel" class="card hidden"><h2>Search Filters</h2><input id="query" placeholder="wartung AND anlage"/><input id="filetype" placeholder="pdf/docx/pptx/txt"/><input id="pathFilter" placeholder="/documents/customer"/><input id="blockType" placeholder="page/paragraph/table/slide"/><input id="modifiedFrom" placeholder="2026-01-01T00:00:00+00:00"/><input id="modifiedTo" placeholder="2026-12-31T23:59:59+00:00"/><button class="btn" onclick="runSearch()">Search</button><div id="results"></div></section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

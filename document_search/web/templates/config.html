@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Configuration · Document Search</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="card">
+        <h1>Configuration</h1>
+        <p class="muted">Manage database and crawler settings.</p>
+        <a class="btn btn-secondary" href="/">Back to Landing Page</a>
+      </header>
+
+      <section class="card">
+        <h2>Login</h2>
+        <div class="grid-2">
+          <label>Username<input id="username" placeholder="username" value="admin" /></label>
+          <label>Password<input id="password" type="password" placeholder="password" /></label>
+        </div>
+        <button class="btn" onclick="login({redirectToApp:false})">Login for Config</button>
+        <p id="loginResult" class="status"></p>
+      </section>
+
+      <section id="configPanel" class="card hidden"><h2>Configuration Values</h2><input id="cfgDb" placeholder="/data/document_index.db"/><input id="cfgExt" placeholder=".pdf,.docx,.pptx,.txt"/><input id="cfgExcludeDirs" placeholder=".git,node_modules,__pycache__,.venv,temp"/><input id="cfgExcludePatterns" placeholder="~$*,*.tmp"/><input id="cfgMaxSize" placeholder="100"/><button class="btn" onclick="loadConfig()">Load</button><button class="btn btn-secondary" onclick="saveConfig()">Save</button><pre id="configResult"></pre></section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
