@@ -7,25 +7,12 @@
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body>
+  <body data-page="config">
+    <nav class="topbar"><div class="topbar-inner container"><a class="brand" href="/">Document Search</a><div class="nav-links"><a href="/">Dashboard</a><a href="/search">Search</a><a href="/ingest">Ingest</a><a href="/config">Config</a></div></div></nav>
     <main class="container">
-      <header class="card">
-        <h1>Configuration</h1>
-        <p class="muted">Manage database and crawler settings.</p>
-        <a class="btn btn-secondary" href="/">Back to Landing Page</a>
-      </header>
-
-      <section class="card">
-        <h2>Login</h2>
-        <div class="grid-2">
-          <label>Username<input id="username" placeholder="username" value="admin" /></label>
-          <label>Password<input id="password" type="password" placeholder="password" /></label>
-        </div>
-        <button class="btn" onclick="login({redirectToApp:false})">Login for Config</button>
-        <p id="loginResult" class="status"></p>
-      </section>
-
-      <section id="configPanel" class="card hidden"><h2>Configuration Values</h2><input id="cfgDb" placeholder="/data/document_index.db"/><input id="cfgExt" placeholder=".pdf,.docx,.pptx,.txt"/><input id="cfgExcludeDirs" placeholder=".git,node_modules,__pycache__,.venv,temp"/><input id="cfgExcludePatterns" placeholder="~$*,*.tmp"/><input id="cfgMaxSize" placeholder="100"/><button class="btn" onclick="loadConfig()">Load</button><button class="btn btn-secondary" onclick="saveConfig()">Save</button><pre id="configResult"></pre></section>
+      <header class="card"><h1>Configuration</h1><p class="muted">Manage database and crawler settings.</p></header>
+      <section class="card"><h2>Login</h2><div class="form-grid"><label>Username<input id="username" placeholder="username" value="admin" /></label><label>Password<input id="password" type="password" placeholder="password" /></label></div><button class="btn" onclick="login({redirectToApp:false})">Login for Config</button><p id="loginResult" class="status"></p></section>
+      <section id="configPanel" class="card hidden"><h2>Configuration Values</h2><div class="form-grid"><input id="cfgDb" placeholder="/data/document_index.db"/><input id="cfgExt" placeholder=".pdf,.docx,.pptx,.txt"/><input id="cfgExcludeDirs" placeholder=".git,node_modules,__pycache__,.venv,temp"/><input id="cfgExcludePatterns" placeholder="~$*,*.tmp"/><input id="cfgMaxSize" placeholder="100"/></div><button class="btn" onclick="loadConfig()">Load</button><button class="btn btn-secondary" onclick="saveConfig()">Save</button><pre id="configResult"></pre></section>
     </main>
     <script src="/static/app.js"></script>
   </body>

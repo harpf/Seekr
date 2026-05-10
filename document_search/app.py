@@ -313,7 +313,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         db = store()
         docs = db.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
         blocks = db.conn.execute("SELECT COUNT(*) FROM content_blocks").fetchone()[0]
-        return {"documents": docs, "content_blocks": blocks, "db_path": db_path}
+        total_size = db.conn.execute("SELECT COALESCE(SUM(file_size), 0) FROM documents").fetchone()[0]
+        return {"documents": docs, "content_blocks": blocks, "total_file_size_bytes": total_size, "db_path": db_path}
 
     @app.get("/api/files/open")
     def api_files_open(document_id: int, x_auth_token: str | None = Header(default=None)):
