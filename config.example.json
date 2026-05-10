@@ -1,0 +1,13 @@
+{
+  "database_path": "./document_index.db",
+  "supported_extensions": [".pdf", ".docx", ".pptx", ".txt", ".md", ".doc", ".ppt"],
+  "exclude_dirs": [".git", "node_modules", "__pycache__", ".venv", "temp"],
+  "exclude_patterns": ["~$*", "*.tmp"],
+  "max_file_size_mb": 100,
+  "logging_level": "INFO",
+  "default_limit": 20,
+  "ignore_hidden": true,
+  "ignore_temp_office_files": true,
+  "follow_symlinks": false,
+  "ocr": {"enabled": false, "languages": ["deu", "eng"]}
+}
