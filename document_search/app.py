@@ -130,6 +130,18 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     def index_page(request: Request):
         return templates.TemplateResponse("index.html", {"request": request})
 
+    @app.get("/config", response_class=HTMLResponse)
+    def config_page(request: Request):
+        return templates.TemplateResponse("config.html", {"request": request})
+
+    @app.get("/search", response_class=HTMLResponse)
+    def search_page(request: Request):
+        return templates.TemplateResponse("search.html", {"request": request})
+
+    @app.get("/ingest", response_class=HTMLResponse)
+    def ingest_page(request: Request):
+        return templates.TemplateResponse("ingest.html", {"request": request})
+
     
     @app.get("/api/config")
     def api_get_config(x_auth_token: str | None = Header(default=None)):
