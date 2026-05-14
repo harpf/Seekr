@@ -1,19 +1,177 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Configuration · Document Search</title>
-    <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/static/styles.css" />
-  </head>
-  <body data-page="config">
-    <nav class="topbar"><div class="topbar-inner container"><a class="brand" href="/">Document Search</a><div class="nav-links"><a href="/">Dashboard</a><a href="/search">Search</a><a href="/ingest">Ingest</a><a href="/config">Config</a></div></div></nav>
-    <main class="container">
-      <header class="card"><h1>Configuration</h1><p class="muted">Manage database and crawler settings.</p></header>
-      <section class="card"><h2>Login</h2><div class="form-grid"><label>Username<input id="username" placeholder="username" value="admin" /></label><label>Password<input id="password" type="password" placeholder="password" /></label></div><button class="btn" onclick="login({redirectToApp:false})">Login for Config</button><p id="loginResult" class="status"></p></section>
-      <section id="configPanel" class="card hidden"><h2>Configuration Values</h2><div class="form-grid"><input id="cfgDb" placeholder="/data/document_index.db"/><input id="cfgExt" placeholder=".pdf,.docx,.pptx,.txt"/><input id="cfgExcludeDirs" placeholder=".git,node_modules,__pycache__,.venv,temp"/><input id="cfgExcludePatterns" placeholder="~$*,*.tmp"/><input id="cfgMaxSize" placeholder="100"/></div><button class="btn" onclick="loadConfig()">Load</button><button class="btn btn-secondary" onclick="saveConfig()">Save</button><pre id="configResult"></pre></section>
-    </main>
-    <script src="/static/app.js"></script>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Config · Seekr</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body class="wrap" data-page="config">
+
+  <nav class="topbar">
+    <div class="topbar-inner container">
+      <a class="brand" href="/">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Seekr
+      </a>
+      <div class="nav-links">
+        <a href="/">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span class="nav-lbl">Dashboard</span>
+        </a>
+        <a href="/search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span class="nav-lbl">Search</span>
+        </a>
+        <a href="/ingest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <span class="nav-lbl">Ingest</span>
+        </a>
+        <a href="/config">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+          <span class="nav-lbl">Config</span>
+        </a>
+        <div id="navSep" class="nav-sep hidden"></div>
+        <button id="navSignout" class="nav-signout hidden" onclick="signOut()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          <span class="nav-lbl">Sign out</span>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main">
+    <div class="container">
+
+      <!-- ── Auth gate ── -->
+      <div id="authGate" class="auth-wrap">
+        <div class="pg-head">
+          <h1>Configuration</h1>
+          <p>Sign in to manage system settings.</p>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <div class="card-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <div class="card-titles">
+              <h2>Sign in</h2>
+              <p>Authentication required</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="f-grid" style="grid-template-columns:1fr;">
+              <div class="f-col">
+                <label class="f-label" for="username">Username</label>
+                <input id="username" placeholder="admin" value="admin" autocomplete="username" />
+              </div>
+              <div class="f-col">
+                <label class="f-label" for="password">Password</label>
+                <input id="password" type="password" placeholder="••••••••" autocomplete="current-password" />
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-p" onclick="login()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+                Sign in
+              </button>
+            </div>
+            <p id="loginResult" class="feedback"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Config panel ── -->
+      <div id="configPanel" class="hidden">
+
+        <div class="pg-head">
+          <h1>Configuration</h1>
+          <p>Manage database path, crawler settings, and file filters.</p>
+        </div>
+
+        <!-- Storage settings -->
+        <div class="card">
+          <div class="card-head">
+            <div class="card-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            </div>
+            <div class="card-titles">
+              <h2>Storage</h2>
+              <p>Database file location</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="f-grid" style="grid-template-columns:1fr;">
+              <div class="f-col">
+                <label class="f-label" for="cfgDb">Database path</label>
+                <input id="cfgDb" placeholder="/data/document_index.db" />
+                <span class="f-hint">Absolute path to the SQLite index file</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- File filters -->
+        <div class="card">
+          <div class="card-head">
+            <div class="card-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+            </div>
+            <div class="card-titles">
+              <h2>File Filters</h2>
+              <p>Control which files are included or excluded during indexing</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="f-grid">
+              <div class="f-col f-full">
+                <label class="f-label" for="cfgExt">Supported extensions</label>
+                <input id="cfgExt" placeholder=".pdf, .docx, .pptx, .txt" />
+                <span class="f-hint">Comma-separated list of file extensions to index</span>
+              </div>
+              <div class="f-col">
+                <label class="f-label" for="cfgExcludeDirs">Exclude directories</label>
+                <input id="cfgExcludeDirs" placeholder=".git, node_modules, __pycache__, .venv" />
+                <span class="f-hint">Folder names to skip during crawling</span>
+              </div>
+              <div class="f-col">
+                <label class="f-label" for="cfgExcludePatterns">Exclude patterns</label>
+                <input id="cfgExcludePatterns" placeholder="~$*, *.tmp" />
+                <span class="f-hint">Glob patterns for files to skip</span>
+              </div>
+              <div class="f-col">
+                <label class="f-label" for="cfgMaxSize">Max file size (MB)</label>
+                <input id="cfgMaxSize" placeholder="100" type="number" min="1" />
+                <span class="f-hint">Files larger than this are skipped</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="card">
+          <div class="card-body">
+            <div class="btn-row">
+              <button class="btn btn-p" onclick="saveConfig()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                Save Configuration
+              </button>
+              <button class="btn btn-g" onclick="loadConfig()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+                Reload
+              </button>
+            </div>
+            <p id="configResult" class="feedback"></p>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </main>
+
+  <div class="toast-wrap" id="toastWrap"></div>
+  <script src="/static/app.js"></script>
+</body>
 </html>

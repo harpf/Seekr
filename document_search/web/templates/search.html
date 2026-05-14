@@ -1,31 +1,171 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Search · Document Search</title>
-    <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/static/styles.css" />
-  </head>
-  <body data-page="search">
-    <nav class="topbar">
-      <div class="topbar-inner container">
-        <a class="brand" href="/">Document Search</a>
-        <div class="nav-links">
-          <a href="/">Dashboard</a><a href="/search">Search</a><a href="/ingest">Ingest</a><a href="/config">Config</a>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Search · Seekr</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body class="wrap" data-page="search">
+
+  <nav class="topbar">
+    <div class="topbar-inner container">
+      <a class="brand" href="/">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Seekr
+      </a>
+      <div class="nav-links">
+        <a href="/">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span class="nav-lbl">Dashboard</span>
+        </a>
+        <a href="/search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span class="nav-lbl">Search</span>
+        </a>
+        <a href="/ingest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <span class="nav-lbl">Ingest</span>
+        </a>
+        <a href="/config">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+          <span class="nav-lbl">Config</span>
+        </a>
+        <div id="navSep" class="nav-sep hidden"></div>
+        <button id="navSignout" class="nav-signout hidden" onclick="signOut()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          <span class="nav-lbl">Sign out</span>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main">
+    <div class="container">
+
+      <!-- ── Auth gate ── -->
+      <div id="authGate" class="auth-wrap">
+        <div class="pg-head">
+          <h1>Search Documents</h1>
+          <p>Sign in to start searching your index.</p>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <div class="card-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <div class="card-titles">
+              <h2>Sign in</h2>
+              <p>Authentication required</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="f-grid" style="grid-template-columns:1fr;">
+              <div class="f-col">
+                <label class="f-label" for="username">Username</label>
+                <input id="username" value="admin" autocomplete="username" />
+              </div>
+              <div class="f-col">
+                <label class="f-label" for="password">Password</label>
+                <input id="password" type="password" placeholder="••••••••" autocomplete="current-password" />
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-p" onclick="login()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+                Sign in
+              </button>
+            </div>
+            <p id="loginResult" class="feedback"></p>
+          </div>
         </div>
       </div>
-    </nav>
 
-    <main class="container">
-      <header class="card"><h1>Search Documents</h1></header>
-      <section class="card">
-        <h2>Login</h2>
-        <div class="form-grid"><label>Username<input id="username" value="admin" /></label><label>Password<input id="password" type="password" /></label></div>
-        <button class="btn" onclick="login()">Login</button><p id="loginResult" class="status"></p>
-      </section>
-      <section id="appPanel" class="card hidden"><h2>Search Filters</h2><div class="form-grid"><input id="query" placeholder="wartung AND anlage"/><input id="filetype" placeholder="pdf/docx/pptx/txt"/><input id="pathFilter" placeholder="/documents/customer"/><input id="blockType" placeholder="page/paragraph/table/slide"/><input id="modifiedFrom" placeholder="2026-01-01T00:00:00+00:00"/><input id="modifiedTo" placeholder="2026-12-31T23:59:59+00:00"/></div><button class="btn" onclick="runSearch()">Search</button><div id="results"></div></section>
-    </main>
-    <script src="/static/app.js"></script>
-  </body>
+      <!-- ── Search panel ── -->
+      <div id="appPanel" class="hidden">
+
+        <div class="pg-head">
+          <h1>Search Documents</h1>
+          <p>Full-text search across all indexed content. Use AND / OR for boolean operators.</p>
+        </div>
+
+        <!-- Query bar -->
+        <div class="card">
+          <div class="card-body">
+            <div class="f-col" style="gap:.5rem;">
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:.2rem;">
+                <label class="f-label" for="query">Search expression</label>
+                <span class="kbd">Press / to focus</span>
+              </div>
+              <div class="search-row">
+                <input id="query" placeholder="e.g. maintenance AND system" />
+                <button class="btn btn-g btn-sm" onclick="clearSearch()" title="Clear">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+                <button class="btn btn-p" onclick="runSearch()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  Search
+                </button>
+              </div>
+            </div>
+
+            <!-- Filters toggle -->
+            <div style="margin-top:.875rem; display:flex; align-items:center; border-top:1px solid var(--b-lo); padding-top:.75rem;">
+              <span style="font-size:.79rem; color:var(--txt-3);">Optional filters</span>
+              <button id="filterToggle" class="filter-toggle-btn" onclick="toggleFilters()" style="margin-left:auto;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                <span class="ft-lbl">Show filters</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+            </div>
+
+            <!-- Filters body (collapsed by default) -->
+            <div id="filterBody" class="hidden" style="margin-top:.875rem;">
+              <div class="f-grid">
+                <div class="f-col">
+                  <label class="f-label" for="filetype">File type</label>
+                  <input id="filetype" placeholder="pdf, docx, pptx, txt" />
+                  <span class="f-hint">Comma-separated or single value</span>
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="pathFilter">Path filter</label>
+                  <input id="pathFilter" placeholder="/documents/customer" />
+                  <span class="f-hint">Prefix match on file path</span>
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="blockType">Block type</label>
+                  <select id="blockType">
+                    <option value="">Any</option>
+                    <option value="page">page</option>
+                    <option value="paragraph">paragraph</option>
+                    <option value="table">table</option>
+                    <option value="slide">slide</option>
+                  </select>
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="modifiedFrom">Modified from</label>
+                  <input id="modifiedFrom" placeholder="2026-01-01T00:00:00+00:00" />
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="modifiedTo">Modified to</label>
+                  <input id="modifiedTo" placeholder="2026-12-31T23:59:59+00:00" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Results -->
+        <div class="results-meta" id="resultsMeta"></div>
+        <div id="results"></div>
+
+      </div>
+
+    </div>
+  </main>
+
+  <div class="toast-wrap" id="toastWrap"></div>
+  <script src="/static/app.js"></script>
+</body>
 </html>
