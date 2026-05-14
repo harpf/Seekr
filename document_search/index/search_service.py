@@ -23,6 +23,8 @@ def search(
     block_type: str | None = None,
     modified_from: str | None = None,
     modified_to: str | None = None,
+    tag: str | None = None,
+    user_id: int | None = None,
 ):
     match_query = build_match_query(query, filetype, path_filter, block_type)
     sql = """
@@ -41,6 +43,14 @@ def search(
     if modified_to:
         sql += " AND d.modified_at <= ?"
         params.append(modified_to)
+    if tag and user_id is not None:
+        sql += """
+            AND d.id IN (
+                SELECT dt.document_id FROM document_tags dt
+                JOIN user_tags ut ON ut.id = dt.tag_id
+                WHERE dt.user_id = ? AND ut.name = ?
+            )"""
+        params.extend([user_id, tag.lower().strip()])
     sql += " ORDER BY c.rank LIMIT ?"
     params.append(limit)
     return store.conn.execute(sql, tuple(params)).fetchall()

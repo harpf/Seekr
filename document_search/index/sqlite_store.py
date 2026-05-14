@@ -12,14 +12,22 @@ from document_search.models import ExtractionResult, FileFingerprint
 class SqliteStore:
     def __init__(self, db_path: Path):
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        self._configure_connection()
         self._init_schema()
+
+    def _configure_connection(self) -> None:
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA foreign_keys=ON")
+        self.conn.execute("PRAGMA synchronous=NORMAL")   # safe with WAL, faster than FULL
+        self.conn.execute("PRAGMA cache_size=-32000")    # 32 MB page cache
+        self.conn.execute("PRAGMA temp_store=MEMORY")
+        self.conn.execute("PRAGMA mmap_size=268435456")  # 256 MB memory-mapped I/O
 
     def _init_schema(self) -> None:
         self.conn.executescript(
             """
-            PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS documents (
               id INTEGER PRIMARY KEY,
               path TEXT UNIQUE NOT NULL,
@@ -92,8 +100,29 @@ class SqliteStore:
               block_number,
               text
             );
+            CREATE INDEX IF NOT EXISTS idx_docs_modified_at  ON documents(modified_at);
+            CREATE INDEX IF NOT EXISTS idx_docs_sha256       ON documents(sha256);
+            CREATE INDEX IF NOT EXISTS idx_blocks_doc_id     ON content_blocks(document_id);
+            CREATE INDEX IF NOT EXISTS idx_doc_tags_doc_id   ON document_tags(document_id);
+            CREATE INDEX IF NOT EXISTS idx_doc_tags_tag_id   ON document_tags(tag_id);
+            CREATE INDEX IF NOT EXISTS idx_user_tags_user_id ON user_tags(user_id);
+            CREATE INDEX IF NOT EXISTS idx_marks_doc_id      ON user_document_marks(document_id);
             """
         )
+        # Migration: add role column for existing databases
+        try:
+            self.conn.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+            self.conn.commit()
+        except Exception:
+            pass
+        # Ensure at least one admin exists after migration
+        try:
+            admin_count = self.conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
+            if admin_count == 0:
+                self.conn.execute("UPDATE users SET role='admin' WHERE id=(SELECT MIN(id) FROM users)")
+                self.conn.commit()
+        except Exception:
+            pass
 
     def get_document(self, path: str):
         return self.conn.execute("SELECT * FROM documents WHERE path = ?", (path,)).fetchone()
@@ -121,15 +150,20 @@ class SqliteStore:
             ),
         )
         doc_id = self.conn.execute("SELECT id FROM documents WHERE path = ?", (str(fp.path),)).fetchone()[0]
+        path_str = str(fp.path)
+        name_str = fp.path.name
+        ext_str = fp.path.suffix.lower()
+        fts_rows = []
         for block in ext.blocks:
             cursor = self.conn.execute(
                 "INSERT INTO content_blocks(document_id, block_type, block_number, text, extractor, text_length, metadata_json) VALUES(?,?,?,?,?,?,?)",
                 (doc_id, block.block_type, block.block_number, block.text, block.extractor, len(block.text), str(block.metadata)),
             )
-            block_id = cursor.lastrowid
-            self.conn.execute(
+            fts_rows.append((doc_id, cursor.lastrowid, path_str, name_str, ext_str, block.block_type, str(block.block_number), block.text))
+        if fts_rows:
+            self.conn.executemany(
                 "INSERT INTO content_fts(document_id, block_id, path, filename, extension, block_type, block_number, text) VALUES(?,?,?,?,?,?,?,?)",
-                (doc_id, block_id, str(fp.path), fp.path.name, fp.path.suffix.lower(), block.block_type, str(block.block_number), block.text),
+                fts_rows,
             )
         self.conn.commit()
         return doc_id
@@ -141,16 +175,55 @@ class SqliteStore:
         salt = new_salt()
         pwd = os.getenv("DOCUMENT_SEARCH_DEFAULT_PASSWORD", "admin")
         self.conn.execute(
-            "INSERT INTO users(username,password_hash,salt,created_at) VALUES(?,?,?,?)",
-            ("admin", hash_password(pwd, salt), salt, datetime.now(tz=UTC).isoformat()),
+            "INSERT INTO users(username,password_hash,salt,created_at,role) VALUES(?,?,?,?,?)",
+            ("admin", hash_password(pwd, salt), salt, datetime.now(tz=UTC).isoformat(), "admin"),
         )
         self.conn.commit()
 
     def get_user(self, username: str):
-        row = self.conn.execute("SELECT id,username,password_hash,salt FROM users WHERE username=?", (username,)).fetchone()
+        row = self.conn.execute(
+            "SELECT id, username, password_hash, salt, role FROM users WHERE username=?", (username,)
+        ).fetchone()
         if not row:
             return None
         return row
+
+    def get_user_by_id(self, user_id: int):
+        return self.conn.execute(
+            "SELECT id, username, role, created_at FROM users WHERE id=?", (user_id,)
+        ).fetchone()
+
+    def list_users(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id, username, role, created_at FROM users ORDER BY id"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def create_user(self, username: str, password: str, role: str = "user") -> int:
+        salt = new_salt()
+        now = datetime.now(tz=UTC).isoformat()
+        cursor = self.conn.execute(
+            "INSERT INTO users(username, password_hash, salt, created_at, role) VALUES(?,?,?,?,?)",
+            (username, hash_password(password, salt), salt, now, role),
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def update_user_role(self, user_id: int, role: str) -> None:
+        self.conn.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
+        self.conn.commit()
+
+    def delete_user(self, user_id: int) -> None:
+        self.conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+        self.conn.commit()
+
+    def change_password(self, user_id: int, new_password: str) -> None:
+        salt = new_salt()
+        self.conn.execute(
+            "UPDATE users SET password_hash=?, salt=? WHERE id=?",
+            (hash_password(new_password, salt), salt, user_id),
+        )
+        self.conn.commit()
 
     def set_mark(self, user_id: int, document_id: int, is_marked: bool) -> None:
         self.conn.execute(
@@ -200,6 +273,38 @@ class SqliteStore:
         for row in tag_rows:
             out[row["document_id"]]["tags"].append(row["name"])
         return out
+
+    def move_document(self, document_id: int, new_path: str) -> None:
+        new_p = Path(new_path)
+        self.conn.execute("DELETE FROM content_fts WHERE document_id = ?", (document_id,))
+        self.conn.execute(
+            "UPDATE documents SET path=?, filename=? WHERE id=?",
+            (new_path, new_p.name, document_id),
+        )
+        blocks = self.conn.execute(
+            "SELECT id, block_type, block_number, text FROM content_blocks WHERE document_id=?",
+            (document_id,),
+        ).fetchall()
+        for block in blocks:
+            self.conn.execute(
+                "INSERT INTO content_fts(document_id, block_id, path, filename, extension, block_type, block_number, text) VALUES(?,?,?,?,?,?,?,?)",
+                (document_id, block["id"], new_path, new_p.name, new_p.suffix.lower(), block["block_type"], block["block_number"], block["text"]),
+            )
+        self.conn.commit()
+
+    def get_user_tags(self, user_id: int) -> list[dict]:
+        rows = self.conn.execute(
+            """
+            SELECT ut.name, COUNT(dt.document_id) AS doc_count
+            FROM user_tags ut
+            LEFT JOIN document_tags dt ON dt.tag_id = ut.id AND dt.user_id = ut.user_id
+            WHERE ut.user_id = ?
+            GROUP BY ut.id, ut.name
+            ORDER BY doc_count DESC, ut.name
+            """,
+            (user_id,),
+        ).fetchall()
+        return [{"name": r["name"], "count": r["doc_count"]} for r in rows]
 
     def remove_missing(self) -> int:
         rows = self.conn.execute("SELECT id,path FROM documents").fetchall()

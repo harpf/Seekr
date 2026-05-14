@@ -139,6 +139,30 @@
           </div>
         </div>
 
+        <!-- AI filing suggestion (shown after upload) -->
+        <div id="aiSuggestionCard" class="card hidden">
+          <div class="card-head">
+            <div class="card-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 100 20A10 10 0 0012 2z"/><path d="M12 8v4l3 3"/></svg>
+            </div>
+            <div class="card-titles">
+              <h2>AI Filing Suggestion</h2>
+              <p id="aiSuggestionModel" class="muted" style="font-size:.78rem;"></p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="aiSuggestionContent" class="ai-suggestion-grid"></div>
+            <div class="btn-row">
+              <button class="btn btn-p" id="aiApplyBtn" onclick="applyAiSuggestion()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                Apply &amp; move file
+              </button>
+              <button class="btn btn-g" onclick="dismissAiSuggestion()">Dismiss</button>
+            </div>
+            <p id="aiApplyResult" class="feedback"></p>
+          </div>
+        </div>
+
         <!-- Index documents -->
         <div class="card">
           <div class="card-head">
@@ -171,24 +195,141 @@
           </div>
         </div>
 
-        <!-- System update -->
+        <!-- AI Reorganizer (admin only) -->
+        <div class="card admin-only hidden" id="reorganizerCard">
+          <div class="card-head">
+            <div class="card-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
+            </div>
+            <div class="card-titles">
+              <h2>AI Reorganizer</h2>
+              <p>Let Ollama suggest optimal folder paths for uploaded documents</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="f-grid" style="grid-template-columns: auto 1fr;">
+              <div class="f-col">
+                <label class="f-label" for="reorganizeLimit">Documents to analyse</label>
+                <input id="reorganizeLimit" type="number" min="1" max="50" value="10" style="width:80px;" />
+              </div>
+              <div class="f-col" style="justify-content:flex-end;align-self:flex-end;">
+                <button class="btn btn-p" id="reorganizeStartBtn" onclick="startAiReorganize()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  Analyse with AI
+                </button>
+              </div>
+            </div>
+
+            <div id="reorganizeProgress" class="progress-wrap hidden">
+              <div class="progress-bar"><div id="reorganizeProgressFill" class="progress-fill"></div></div>
+              <div id="reorganizeProgressStatus" class="progress-status"></div>
+            </div>
+
+            <div id="reorganizeResults" class="hidden gap-top">
+              <div class="u-table-wrap">
+                <table class="u-table" id="reorganizeTable">
+                  <thead>
+                    <tr>
+                      <th><input type="checkbox" id="reorganizeSelectAll" onchange="toggleSelectAll(this)" /></th>
+                      <th>Filename</th>
+                      <th>Current location</th>
+                      <th>AI suggested path</th>
+                      <th>Tags</th>
+                      <th>Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody id="reorganizeTableBody"></tbody>
+                </table>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-p" id="reorganizeApplyBtn" onclick="applySelectedMoves()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  Apply selected
+                </button>
+              </div>
+              <p id="reorganizeApplyResult" class="feedback"></p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Index Maintenance -->
         <div class="card">
           <div class="card-head">
             <div class="card-ico">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
             </div>
             <div class="card-titles">
-              <h2>System Update</h2>
-              <p>Re-scan all configured paths and refresh the index</p>
+              <h2>Index Maintenance</h2>
+              <p>Reindex individual documents or clean up stale entries</p>
             </div>
           </div>
           <div class="card-body">
-            <p class="muted" style="font-size:.875rem;">Triggers a full update run across all registered sources. This may take several minutes for large document sets.</p>
-            <div class="btn-row">
+            <div class="f-grid">
+              <div class="f-col">
+                <label class="f-label" for="reindexDocId">Reindex document by ID</label>
+                <div style="display:flex;gap:.5rem;align-items:center;">
+                  <input id="reindexDocId" type="number" min="1" placeholder="e.g. 42" style="width:120px;" />
+                  <button id="reindexBtn" class="btn btn-p" onclick="reindexDocument()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+                    Reindex
+                  </button>
+                </div>
+                <p id="reindexResult" class="feedback" style="margin-top:.5rem;"></p>
+              </div>
+              <div class="f-col" style="align-self:flex-end;">
+                <label class="f-label">Remove missing files</label>
+                <p class="muted" style="font-size:.82rem;margin-bottom:.5rem;">Removes index entries whose files no longer exist on disk.</p>
+                <button id="cleanupBtn" class="btn btn-g" onclick="runIndexCleanup()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                  Clean up index
+                </button>
+                <p id="cleanupResult" class="feedback" style="margin-top:.5rem;"></p>
+              </div>
+            </div>
+            <div class="f-col f-full" style="margin-top:.75rem;">
+              <label class="f-label">Full re-scan</label>
+              <p class="muted" style="font-size:.82rem;margin-bottom:.5rem;">Triggers a full update run across all registered sources. This may take several minutes for large document sets.</p>
               <button id="runUpdateBtn" class="btn btn-g" onclick="runUpdate()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-                Run Update
+                Run Full Re-scan
               </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI: Folder Structure Suggestions (admin only) -->
+        <div class="card admin-only hidden" id="structureSuggestCard">
+          <div class="card-head">
+            <div class="card-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h6v6h-6zM9 6h6M6 9v6M18 9v6M9 18h6"/></svg>
+            </div>
+            <div class="card-titles">
+              <h2>AI: Folder Structure Suggestions</h2>
+              <p>Let Ollama analyse your index and suggest an optimal folder taxonomy</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
+              <div class="f-col" style="flex-shrink:0;">
+                <label class="f-label" for="structureSampleSize">Documents to analyse</label>
+                <input id="structureSampleSize" type="number" min="10" max="100" value="50" style="width:80px;" />
+              </div>
+              <div class="f-col" style="align-self:flex-end;">
+                <button id="structureStartBtn" class="btn btn-p" onclick="startStructureSuggestion()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  Analyse with AI
+                </button>
+              </div>
+            </div>
+
+            <div id="structureProgress" class="progress-wrap hidden" style="margin-top:.875rem;">
+              <div class="progress-bar"><div id="structureProgressFill" class="progress-fill"></div></div>
+              <div id="structureProgressStatus" class="progress-status"></div>
+            </div>
+
+            <div id="structureResult" class="hidden gap-top">
+              <p id="structureRationale" class="muted" style="font-size:.85rem;margin-bottom:.75rem;"></p>
+              <div id="structureFolderList"></div>
             </div>
           </div>
         </div>

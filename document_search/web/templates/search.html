@@ -151,8 +151,26 @@
                   <label class="f-label" for="modifiedTo">Modified to</label>
                   <input id="modifiedTo" placeholder="2026-12-31T23:59:59+00:00" />
                 </div>
+                <div class="f-col f-full">
+                  <label class="f-label">Filter by tag</label>
+                  <div id="tagFilterWrap" style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;">
+                    <input id="tagFilterInput" placeholder="tag name" style="width:160px;" />
+                    <button class="btn btn-g btn-sm" onclick="clearTagFilter()">Clear tag</button>
+                  </div>
+                </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Tag cloud -->
+        <div id="tagCloudCard" class="card hidden" style="margin-bottom:.75rem;">
+          <div class="card-body" style="padding:.75rem 1rem;">
+            <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem;">
+              <span style="font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--txt-3);">Browse by tag</span>
+              <button class="btn btn-g btn-sm" onclick="loadTagCloud()" title="Refresh">↻</button>
+            </div>
+            <div id="tagCloud" style="display:flex;gap:.4rem;flex-wrap:wrap;"></div>
           </div>
         </div>
 

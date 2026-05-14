@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile document_search/app.py document_search/services/ai_organizer.py)",
+      "Bash(python -m pytest -q)",
+      "Bash(node *)"
+    ]
+  }
+}

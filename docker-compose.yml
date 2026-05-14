@@ -6,12 +6,40 @@ services:
       DOCUMENT_SEARCH_DB: /data/document_index.db
       DOCUMENT_SEARCH_CONFIG_PATH: /data/config.json
       DOCUMENT_SEARCH_UI_UPDATE_ENABLED: "true"
+      # Ollama integration — points to the ollama service on the internal network
+      DOCUMENT_SEARCH_OLLAMA_URL: "http://ollama:11434"
+      DOCUMENT_SEARCH_OLLAMA_MODEL: "llama3.2"
+      # Override upload root so uploads land in the writable /data volume:
+      DOCUMENT_SEARCH_UPLOAD_ROOT: "/data/uploads"
     expose:
       - "8080"
     volumes:
       - ./data:/data
       - ./documents:/documents:ro
+    depends_on:
+      - ollama
     restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: seekr-ollama
+    environment:
+      # Keep the loaded model in VRAM / RAM between requests
+      OLLAMA_KEEP_ALIVE: "24h"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Expose Ollama on the host if you want direct curl/API access:
+    # ports:
+    #   - "11434:11434"
+    restart: unless-stopped
+    # ── NVIDIA GPU acceleration (uncomment to enable) ──────────────────
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
 
   tls-proxy:
     image: nginx:1.27-alpine
@@ -29,3 +57,7 @@ services:
       - ./certs:/certs
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     restart: unless-stopped
+
+volumes:
+  # Persists Ollama model weights across container restarts
+  ollama_data:

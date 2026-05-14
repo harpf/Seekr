@@ -16,22 +16,10 @@
         Seekr
       </a>
       <div class="nav-links">
-        <a href="/">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-          <span class="nav-lbl">Dashboard</span>
-        </a>
-        <a href="/search">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <span class="nav-lbl">Search</span>
-        </a>
-        <a href="/ingest">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          <span class="nav-lbl">Ingest</span>
-        </a>
-        <a href="/config">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
-          <span class="nav-lbl">Config</span>
-        </a>
+        <a href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span class="nav-lbl">Dashboard</span></a>
+        <a href="/search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span class="nav-lbl">Search</span></a>
+        <a href="/ingest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span class="nav-lbl">Ingest</span></a>
+        <a href="/config"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg><span class="nav-lbl">Config</span></a>
         <div id="navSep" class="nav-sep hidden"></div>
         <button id="navSignout" class="nav-signout hidden" onclick="signOut()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -52,24 +40,13 @@
         </div>
         <div class="card">
           <div class="card-head">
-            <div class="card-ico">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            </div>
-            <div class="card-titles">
-              <h2>Sign in</h2>
-              <p>Authentication required</p>
-            </div>
+            <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+            <div class="card-titles"><h2>Sign in</h2><p>Authentication required</p></div>
           </div>
           <div class="card-body">
             <div class="f-grid" style="grid-template-columns:1fr;">
-              <div class="f-col">
-                <label class="f-label" for="username">Username</label>
-                <input id="username" placeholder="admin" value="admin" autocomplete="username" />
-              </div>
-              <div class="f-col">
-                <label class="f-label" for="password">Password</label>
-                <input id="password" type="password" placeholder="••••••••" autocomplete="current-password" />
-              </div>
+              <div class="f-col"><label class="f-label" for="username">Username</label><input id="username" placeholder="admin" value="admin" autocomplete="username" /></div>
+              <div class="f-col"><label class="f-label" for="password">Password</label><input id="password" type="password" placeholder="••••••••" autocomplete="current-password" /></div>
             </div>
             <div class="btn-row">
               <button class="btn btn-p" onclick="login()">
@@ -87,87 +64,571 @@
 
         <div class="pg-head">
           <h1>Configuration</h1>
-          <p>Manage database path, crawler settings, and file filters.</p>
+          <p>Manage data sources, users, SSL certificates, and system settings.</p>
         </div>
 
-        <!-- Storage settings -->
-        <div class="card">
-          <div class="card-head">
-            <div class="card-ico">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-            </div>
-            <div class="card-titles">
-              <h2>Storage</h2>
-              <p>Database file location</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="f-grid" style="grid-template-columns:1fr;">
-              <div class="f-col">
-                <label class="f-label" for="cfgDb">Database path</label>
-                <input id="cfgDb" placeholder="/data/document_index.db" />
-                <span class="f-hint">Absolute path to the SQLite index file</span>
-              </div>
-            </div>
-          </div>
+        <!-- Tab bar -->
+        <div class="tab-bar">
+          <button class="tab active" onclick="switchTab('general')" data-tab="general">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14"/><path d="M4.93 4.93a10 10 0 000 14.14"/></svg>
+            General
+          </button>
+          <button class="tab" onclick="switchTab('paths')" data-tab="paths">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            Paths
+          </button>
+          <button class="tab admin-only hidden" onclick="switchTab('users')" data-tab="users">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+            Users
+          </button>
+          <button class="tab admin-only hidden" onclick="switchTab('ssl')" data-tab="ssl">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            SSL
+          </button>
+          <button class="tab admin-only hidden" onclick="switchTab('ai')" data-tab="ai">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 100 20A10 10 0 0012 2z"/><path d="M12 8v4l3 3"/></svg>
+            AI
+          </button>
+          <button class="tab" onclick="switchTab('system')" data-tab="system">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            System
+          </button>
         </div>
 
-        <!-- File filters -->
-        <div class="card">
-          <div class="card-head">
-            <div class="card-ico">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        <!-- ─── Tab: General ─── -->
+        <div id="tab-general" class="tab-panel">
+
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div>
+              <div class="card-titles"><h2>Storage</h2><p>Database file location</p></div>
             </div>
-            <div class="card-titles">
-              <h2>File Filters</h2>
-              <p>Control which files are included or excluded during indexing</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="f-grid">
-              <div class="f-col f-full">
-                <label class="f-label" for="cfgExt">Supported extensions</label>
-                <input id="cfgExt" placeholder=".pdf, .docx, .pptx, .txt" />
-                <span class="f-hint">Comma-separated list of file extensions to index</span>
-              </div>
-              <div class="f-col">
-                <label class="f-label" for="cfgExcludeDirs">Exclude directories</label>
-                <input id="cfgExcludeDirs" placeholder=".git, node_modules, __pycache__, .venv" />
-                <span class="f-hint">Folder names to skip during crawling</span>
-              </div>
-              <div class="f-col">
-                <label class="f-label" for="cfgExcludePatterns">Exclude patterns</label>
-                <input id="cfgExcludePatterns" placeholder="~$*, *.tmp" />
-                <span class="f-hint">Glob patterns for files to skip</span>
-              </div>
-              <div class="f-col">
-                <label class="f-label" for="cfgMaxSize">Max file size (MB)</label>
-                <input id="cfgMaxSize" placeholder="100" type="number" min="1" />
-                <span class="f-hint">Files larger than this are skipped</span>
+            <div class="card-body">
+              <div class="f-grid" style="grid-template-columns:1fr;">
+                <div class="f-col">
+                  <label class="f-label" for="cfgDb">Database path</label>
+                  <input id="cfgDb" placeholder="/data/document_index.db" />
+                  <span class="f-hint">Absolute path to the SQLite index file</span>
+                </div>
               </div>
             </div>
           </div>
+
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg></div>
+              <div class="card-titles"><h2>File Filters</h2><p>Control which files are included or excluded during indexing</p></div>
+            </div>
+            <div class="card-body">
+              <div class="f-grid">
+                <div class="f-col f-full">
+                  <label class="f-label" for="cfgExt">Supported extensions</label>
+                  <input id="cfgExt" placeholder=".pdf, .docx, .pptx, .txt" />
+                  <span class="f-hint">Comma-separated list of file extensions to index</span>
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="cfgExcludeDirs">Exclude directories</label>
+                  <input id="cfgExcludeDirs" placeholder=".git, node_modules, __pycache__, .venv" />
+                  <span class="f-hint">Folder names to skip during crawling</span>
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="cfgExcludePatterns">Exclude patterns</label>
+                  <input id="cfgExcludePatterns" placeholder="~$*, *.tmp" />
+                  <span class="f-hint">Glob patterns for files to skip</span>
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="cfgMaxSize">Max file size (MB)</label>
+                  <input id="cfgMaxSize" placeholder="100" type="number" min="1" />
+                  <span class="f-hint">Files larger than this are skipped</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-body">
+              <div class="btn-row">
+                <button class="btn btn-p" onclick="saveConfig()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                  Save Configuration
+                </button>
+                <button class="btn btn-g" onclick="loadConfig()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+                  Reload
+                </button>
+              </div>
+              <p id="configResult" class="feedback"></p>
+            </div>
+          </div>
+
         </div>
 
-        <!-- Actions -->
-        <div class="card">
-          <div class="card-body">
-            <div class="btn-row">
-              <button class="btn btn-p" onclick="saveConfig()">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                Save Configuration
-              </button>
-              <button class="btn btn-g" onclick="loadConfig()">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
-                Reload
-              </button>
+        <!-- ─── Tab: Paths ─── -->
+        <div id="tab-paths" class="tab-panel hidden">
+
+          <!-- Source paths list -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg></div>
+              <div class="card-titles"><h2>Source Paths</h2><p>Folders indexed during crawl jobs</p></div>
             </div>
-            <p id="configResult" class="feedback"></p>
+            <div class="card-body">
+              <div id="pathList" class="path-list"></div>
+              <div class="f-grid gap-top" style="grid-template-columns:1fr 1fr auto;">
+                <div class="f-col">
+                  <label class="f-label" for="newPathValue">Path</label>
+                  <input id="newPathValue" placeholder="/documents or //server/share" />
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="newPathLabel">Label</label>
+                  <input id="newPathLabel" placeholder="My Documents" />
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="newPathType">Type</label>
+                  <select id="newPathType">
+                    <option value="local">Local</option>
+                    <option value="smb">SMB/CIFS</option>
+                    <option value="nfs">NFS</option>
+                  </select>
+                </div>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-p" onclick="addSourcePath()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  Add Path
+                </button>
+                <button class="btn btn-g" onclick="savePathsConfig()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
+                  Save Paths
+                </button>
+              </div>
+              <p id="pathsResult" class="feedback"></p>
+            </div>
           </div>
+
+          <!-- Network test -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0114.08 0"/><path d="M1.42 9a16 16 0 0121.16 0"/><path d="M8.53 16.11a6 6 0 016.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg></div>
+              <div class="card-titles"><h2>Network Path Test</h2><p>Verify that a path is accessible from the server</p></div>
+            </div>
+            <div class="card-body">
+              <div class="f-grid" style="grid-template-columns:1fr auto;">
+                <div class="f-col">
+                  <label class="f-label" for="testPathInput">Path to test</label>
+                  <input id="testPathInput" placeholder="/documents or //fileserver/share" />
+                </div>
+                <div class="f-col" style="justify-content:flex-end;">
+                  <label class="f-label">&nbsp;</label>
+                  <button class="btn btn-p" id="testPathBtn" onclick="runPathTest()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    Test
+                  </button>
+                </div>
+              </div>
+              <div id="pathTestResult" class="hidden gap-top">
+                <div class="path-test-grid">
+                  <div class="path-test-item"><span class="path-test-lbl">Exists</span><span id="ptExists" class="badge"></span></div>
+                  <div class="path-test-item"><span class="path-test-lbl">Is directory</span><span id="ptIsDir" class="badge"></span></div>
+                  <div class="path-test-item"><span class="path-test-lbl">Readable</span><span id="ptReadable" class="badge"></span></div>
+                  <div class="path-test-item"><span class="path-test-lbl">Writable</span><span id="ptWritable" class="badge"></span></div>
+                  <div class="path-test-item"><span class="path-test-lbl">Entries</span><span id="ptEntries" class="badge badge-n"></span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mount network share (admin only) -->
+          <div class="card admin-only hidden" id="mountCard">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg></div>
+              <div class="card-titles"><h2>Mount Network Share</h2><p>Mount an SMB/CIFS or NFS share inside the container (Linux/Docker only)</p></div>
+            </div>
+            <div class="card-body">
+              <div class="f-grid">
+                <div class="f-col">
+                  <label class="f-label" for="mountType">Share type</label>
+                  <select id="mountType" onchange="onMountTypeChange()">
+                    <option value="smb">SMB/CIFS (//server/share)</option>
+                    <option value="nfs">NFS (server:/export)</option>
+                  </select>
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="mountRemote">Remote path</label>
+                  <input id="mountRemote" placeholder="//fileserver/docs" />
+                  <span class="f-hint">UNC path for SMB, host:/export for NFS</span>
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="mountPoint">Mount point</label>
+                  <input id="mountPoint" placeholder="/mnt/fileserver-docs" />
+                  <span class="f-hint">Local directory to mount into</span>
+                </div>
+                <div class="f-col" id="mountCredUser">
+                  <label class="f-label" for="mountUser">Username</label>
+                  <input id="mountUser" placeholder="domain\user" autocomplete="off" />
+                </div>
+                <div class="f-col" id="mountCredPass">
+                  <label class="f-label" for="mountPass">Password</label>
+                  <input id="mountPass" type="password" placeholder="••••••••" autocomplete="new-password" />
+                </div>
+                <div class="f-col" id="mountCredDomain">
+                  <label class="f-label" for="mountDomain">Domain (optional)</label>
+                  <input id="mountDomain" placeholder="WORKGROUP" autocomplete="off" />
+                </div>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-p" id="mountBtn" onclick="mountShare()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+                  Mount
+                </button>
+                <button class="btn btn-g" id="unmountBtn" onclick="unmountShare()">Unmount</button>
+              </div>
+              <pre id="mountResult" class="out hidden"></pre>
+            </div>
+          </div>
+
         </div>
 
-      </div>
+        <!-- ─── Tab: Users ─── -->
+        <div id="tab-users" class="tab-panel hidden admin-only">
 
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
+              <div class="card-titles"><h2>User Management</h2><p>Create, edit, and remove user accounts</p></div>
+            </div>
+            <div class="card-body">
+              <div id="userTable" class="u-table-wrap"></div>
+              <p id="usersResult" class="feedback"></p>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
+              <div class="card-titles"><h2>Add User</h2><p>Create a new user account</p></div>
+            </div>
+            <div class="card-body">
+              <div class="f-grid">
+                <div class="f-col">
+                  <label class="f-label" for="newUsername">Username</label>
+                  <input id="newUsername" placeholder="john.doe" autocomplete="off" />
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="newUserPassword">Password</label>
+                  <input id="newUserPassword" type="password" placeholder="••••••••" autocomplete="new-password" />
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="newUserRole">Role</label>
+                  <select id="newUserRole">
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  <span class="f-hint">Admins can manage users, SSL, and system config</span>
+                </div>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-p" onclick="createUser()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  Create User
+                </button>
+              </div>
+              <p id="createUserResult" class="feedback"></p>
+            </div>
+          </div>
+
+          <!-- Inline change-password form (hidden by default) -->
+          <div id="changePwCard" class="card hidden">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></div>
+              <div class="card-titles"><h2>Change Password</h2><p id="changePwLabel">Set new password for user</p></div>
+            </div>
+            <div class="card-body">
+              <input type="hidden" id="changePwUserId" />
+              <div class="f-grid" style="grid-template-columns:1fr;">
+                <div class="f-col">
+                  <label class="f-label" for="changePwInput">New password</label>
+                  <input id="changePwInput" type="password" placeholder="••••••••" autocomplete="new-password" />
+                </div>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-p" onclick="submitChangePassword()">Save Password</button>
+                <button class="btn btn-g" onclick="cancelChangePassword()">Cancel</button>
+              </div>
+              <p id="changePwResult" class="feedback"></p>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ─── Tab: SSL ─── -->
+        <div id="tab-ssl" class="tab-panel hidden admin-only">
+
+          <!-- Status -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+              <div class="card-titles"><h2>SSL Status</h2><p>Current TLS certificate</p></div>
+            </div>
+            <div class="card-body">
+              <div id="sslStatus" class="ssl-status-grid"></div>
+              <div class="btn-row">
+                <button class="btn btn-g" onclick="loadSslStatus()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+                  Refresh
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Generate self-signed -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></div>
+              <div class="card-titles"><h2>Generate Self-Signed Certificate</h2><p>Creates a new RSA-2048 certificate in <code>/data/ssl/</code></p></div>
+            </div>
+            <div class="card-body">
+              <div class="f-grid">
+                <div class="f-col">
+                  <label class="f-label" for="sslCN">Common Name (CN)</label>
+                  <input id="sslCN" placeholder="seekr.local" value="seekr.local" />
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="sslOrg">Organisation</label>
+                  <input id="sslOrg" placeholder="Seekr" value="Seekr" />
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="sslCountry">Country code (2 letters)</label>
+                  <input id="sslCountry" placeholder="DE" value="DE" maxlength="2" style="text-transform:uppercase;" />
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="sslDays">Valid for (days)</label>
+                  <input id="sslDays" type="number" min="1" max="3650" value="365" />
+                </div>
+                <div class="f-col f-full">
+                  <label class="f-label" for="sslSAN">Additional SANs (comma-separated IPs/hostnames)</label>
+                  <input id="sslSAN" placeholder="192.168.1.100, seekr.example.com" />
+                  <span class="f-hint">The CN is always included. Add extra IPs or hostnames here.</span>
+                </div>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-p" id="sslGenBtn" onclick="generateCert()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                  Generate Certificate
+                </button>
+              </div>
+              <p id="sslGenResult" class="feedback"></p>
+            </div>
+          </div>
+
+          <!-- Upload custom cert -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
+              <div class="card-titles"><h2>Upload Custom Certificate</h2><p>Upload your own PEM-encoded certificate and private key</p></div>
+            </div>
+            <div class="card-body">
+              <div class="f-grid">
+                <div class="f-col">
+                  <label class="f-label" for="sslCertFile">Certificate file (.pem)</label>
+                  <input type="file" id="sslCertFile" accept=".pem,.crt,.cer" />
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="sslKeyFile">Private key file (.pem)</label>
+                  <input type="file" id="sslKeyFile" accept=".pem,.key" />
+                </div>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-p" id="sslUploadBtn" onclick="uploadCert()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  Upload &amp; Install
+                </button>
+              </div>
+              <p id="sslUploadResult" class="feedback"></p>
+              <p class="muted" style="font-size:.78rem;margin-top:.75rem;">
+                After installing a certificate, restart the server with
+                <code>--ssl-certfile /data/ssl/cert.pem --ssl-keyfile /data/ssl/key.pem</code>
+                or update your reverse proxy configuration.
+              </p>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ─── Tab: AI ─── -->
+        <div id="tab-ai" class="tab-panel hidden admin-only">
+
+          <!-- Connection & model config -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0114.08 0"/><path d="M1.42 9a16 16 0 0121.16 0"/><path d="M8.53 16.11a6 6 0 016.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg></div>
+              <div class="card-titles"><h2>Ollama Connection</h2><p>Configure and verify the local LLM backend</p></div>
+            </div>
+            <div class="card-body">
+              <div class="f-grid">
+                <div class="f-col f-full">
+                  <label class="f-label" for="aiCfgUrl">Ollama URL</label>
+                  <input id="aiCfgUrl" placeholder="http://ollama:11434" />
+                  <span class="f-hint">Internal Docker service address or external host</span>
+                </div>
+                <div class="f-col">
+                  <label class="f-label">Active model</label>
+                  <select id="aiCfgModelSelect" onchange="onAiModelSelectChange()" style="display:none;">
+                    <option value="">— loading —</option>
+                  </select>
+                  <input id="aiCfgModelText" placeholder="llama3.2" />
+                  <span class="f-hint">Model used for document analysis and filing suggestions</span>
+                </div>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-p" onclick="saveAiConfig()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
+                  Save &amp; Apply
+                </button>
+                <button class="btn btn-g" id="testConnBtn" onclick="testAiConnection()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                  Test connection
+                </button>
+              </div>
+              <div id="testConnResult" class="hidden gap-top">
+                <div id="testConnGrid" class="path-test-grid"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- System resources -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+              <div class="card-titles"><h2>System Resources</h2><p>Available RAM and GPU — determines which model sizes are safe to run</p></div>
+            </div>
+            <div class="card-body">
+              <div id="sysResGrid" class="path-test-grid"></div>
+              <div id="aiRecommendation" class="hidden gap-top">
+                <div class="ai-rec-banner">
+                  <strong id="aiRecTier"></strong>
+                  <span id="aiRecDesc"></span>
+                  <span id="aiRecExamples" class="muted"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Model library -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></div>
+              <div class="card-titles"><h2>Model Library</h2><p>Pulled models — green = safe, amber = tight, red = likely too large for available RAM</p></div>
+            </div>
+            <div class="card-body">
+              <div id="modelLibraryWrap" class="u-table-wrap"></div>
+
+              <hr class="sep" />
+              <p class="f-label" style="margin-bottom:.5rem;">Pull a new model from Ollama registry</p>
+              <div class="f-grid" style="grid-template-columns:1fr auto;">
+                <div class="f-col">
+                  <input id="pullModelNameInput" placeholder="llama3.2, qwen2.5:3b, mistral, tinyllama…" />
+                  <span class="f-hint">Any model name from hub.ollama.ai — pull may take several minutes</span>
+                </div>
+                <div class="f-col" style="justify-content:flex-end;">
+                  <button class="btn btn-p" id="pullModelBtnAi" onclick="pullModelFromAiTab()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Pull
+                  </button>
+                </div>
+              </div>
+              <div id="pullProgressAi" class="progress-wrap hidden">
+                <div class="progress-bar"><div id="pullProgressFillAi" class="progress-fill"></div></div>
+                <div id="pullProgressStatusAi" class="progress-status"></div>
+              </div>
+              <p id="pullResultAi" class="feedback"></p>
+            </div>
+          </div>
+
+        </div><!-- /tab-ai -->
+
+        <!-- ─── Tab: System ─── -->
+        <div id="tab-system" class="tab-panel hidden">
+
+          <!-- DB test -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div>
+              <div class="card-titles"><h2>Database Test</h2><p>Check database connectivity and integrity</p></div>
+            </div>
+            <div class="card-body">
+              <div id="dbTestResult" class="hidden">
+                <div class="path-test-grid" id="dbTestGrid"></div>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-p" id="dbTestBtn" onclick="runDbTest()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                  Run DB Test
+                </button>
+              </div>
+              <p id="dbTestFeedback" class="feedback"></p>
+            </div>
+          </div>
+
+          <!-- AI / Ollama status -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 100 20A10 10 0 0012 2z"/><path d="M12 8v4l3 3"/></svg></div>
+              <div class="card-titles"><h2>AI / Ollama</h2><p>Status of the local LLM backend</p></div>
+            </div>
+            <div class="card-body">
+              <div id="aiStatusGrid" class="path-test-grid"></div>
+              <div id="aiModelList" class="gap-top hidden">
+                <p class="f-label" style="margin-bottom:.4rem;">Available models</p>
+                <div id="aiModelTags" style="display:flex;flex-wrap:wrap;gap:.35rem;"></div>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-g" onclick="loadAiStatus()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+                  Refresh
+                </button>
+                <button class="btn btn-g admin-only hidden" id="pullModelBtn" onclick="pullModel()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Pull model
+                </button>
+              </div>
+              <p id="aiPullResult" class="feedback"></p>
+            </div>
+          </div>
+
+          <!-- Dependencies -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+              <div class="card-titles"><h2>System Dependencies</h2><p>Runtime tools for document extraction</p></div>
+            </div>
+            <div class="card-body">
+              <div id="depsGrid" class="path-test-grid"></div>
+              <div class="btn-row">
+                <button class="btn btn-g" onclick="loadDeps()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+                  Refresh
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- System update (admin only) -->
+          <div class="card admin-only hidden">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg></div>
+              <div class="card-titles"><h2>System Update</h2><p>Run the container update script</p></div>
+            </div>
+            <div class="card-body">
+              <div class="btn-row">
+                <button class="btn btn-g" id="runUpdateBtn" onclick="runUpdate()">Run Update</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div><!-- /configPanel -->
     </div>
   </main>
 
