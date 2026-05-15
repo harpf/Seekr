@@ -665,6 +665,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     def api_index_start(req: IndexRequest, x_auth_token: str | None = Header(default=None)):
         require_admin(x_auth_token)
         for p in req.paths:
+            if not p.strip():
+                raise HTTPException(status_code=400, detail="Path must not be empty.")
             # Normalize to canonical POSIX path and collapse any leading double-slashes
             norm = "/" + posixpath.normpath(p).lstrip("/")
             if norm in _BLOCKED_EXACT or norm.startswith(_BLOCKED_PREFIXES):

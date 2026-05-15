@@ -43,6 +43,11 @@ def test_index_start_blocks_double_slash_proc(client):
     assert resp.status_code == 400
 
 
+def test_index_start_blocks_empty_string_path(client):
+    resp = client.post("/api/index/start", json={"paths": [""]}, headers=auth_headers(client))
+    assert resp.status_code == 400
+
+
 def test_index_start_allows_legitimate_path(client):
     # /mnt/data is not a blocked path — should not return 400 for path validation
     # It may return 400 for other reasons (e.g. path doesn't exist) but NOT "not allowed"
