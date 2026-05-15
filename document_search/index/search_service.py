@@ -6,7 +6,6 @@ from document_search.index.sqlite_store import SqliteStore
 def build_match_query(
     query: str,
     filetype: str | None = None,
-    path_filter: str | None = None,
     block_type: str | None = None,
 ) -> str | None:
     q = (query or "").strip()
@@ -20,8 +19,6 @@ def build_match_query(
         elif len(extensions) > 1:
             or_parts = " OR ".join(f"extension:{e}" for e in extensions)
             clauses.append(f"({or_parts})")
-    if path_filter:
-        clauses.append(f"path:{path_filter}*")
     if block_type:
         clauses.append(f"block_type:{block_type}")
     return " AND ".join(clauses)
@@ -103,7 +100,7 @@ def search(
     user_id: int | None = None,
 ):
     tags = [t.lower().strip() for t in (tags or [])]
-    match_query = build_match_query(query, filetype, path_filter, block_type)
+    match_query = build_match_query(query, filetype, block_type)
 
     if match_query is None:
         return _browse_all(
@@ -123,6 +120,9 @@ def search(
         WHERE content_fts MATCH ?
     """
     params: list = [match_query]
+    if path_filter:
+        sql += " AND d.path LIKE ?"
+        params.append(path_filter + "%")
     if modified_from:
         sql += " AND d.modified_at >= ?"
         params.append(modified_from)
