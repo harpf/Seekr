@@ -1421,7 +1421,10 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     def api_search(req: SearchRequest, x_auth_token: str | None = Header(default=None)):
         user_id = require_user(x_auth_token)
         db = store()
-        rows = search(db, req.query, req.limit, req.filetype, req.path, req.block_type, req.modified_from, req.modified_to, req.tags, user_id)
+        try:
+            rows = search(db, req.query, req.limit, req.filetype, req.path, req.block_type, req.modified_from, req.modified_to, req.tags, user_id)
+        except sqlite3.OperationalError as e:
+            raise HTTPException(status_code=400, detail=f"Search query error: {e}")
         payload = [dict(r) for r in rows]
         marks = db.get_doc_marks_and_tags(user_id, [r["document_id"] for r in payload])
         for item in payload:

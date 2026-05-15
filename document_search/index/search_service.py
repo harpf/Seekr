@@ -71,6 +71,9 @@ def _browse_all(
         )
         params.extend([user_id] + tags + [len(tags)])
 
+    # Returns one row per content_block, not per document.
+    # LIMIT therefore limits blocks — callers that group by document_id
+    # (see api_search in app.py) handle this correctly.
     sql = f"""
         SELECT NULL AS rank,
                d.id AS document_id, d.filename, d.path, d.extension,
@@ -108,6 +111,7 @@ def search(
             modified_from, modified_to, tags, user_id, limit,
         )
 
+    # snippet() column 7 = text (0-based FTS5 index order in content_fts)
     sql = """
         SELECT c.rank, d.id as document_id, d.filename, d.path, d.extension,
                d.modified_at, d.indexed_at,
