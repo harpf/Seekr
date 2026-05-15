@@ -49,3 +49,21 @@ def test_index_start_allows_legitimate_path(client):
     resp = client.post("/api/index/start", json={"paths": ["/mnt/data"]}, headers=auth_headers(client))
     if resp.status_code == 400:
         assert "not allowed" not in resp.json().get("detail", "").lower()
+
+
+def test_index_extensions_endpoint(client):
+    resp = client.get("/api/index/extensions", headers=auth_headers(client))
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+def test_folders_endpoint(client):
+    resp = client.get("/api/folders", headers=auth_headers(client))
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+def test_source_folders_endpoint(client):
+    resp = client.get("/api/source-folders", headers=auth_headers(client))
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)

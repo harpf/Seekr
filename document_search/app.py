@@ -614,6 +614,51 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
         return {"status": "uploaded", "path": str(out), "document_id": doc_id, "ai_suggestion": suggestion.__dict__}
 
+    @app.get("/api/folders")
+    def api_folders(x_auth_token: str | None = Header(default=None)):
+        require_user(x_auth_token)
+        root = str(upload_root)
+        if not os.path.isdir(root):
+            return []
+        results = []
+        for dirpath, dirnames, _ in os.walk(root):
+            depth = os.path.relpath(dirpath, root).count(os.sep)
+            if depth >= 2:
+                dirnames.clear()
+                continue
+            rel = os.path.relpath(dirpath, root)
+            if rel != ".":
+                results.append(rel)
+        return results
+
+    @app.get("/api/source-folders")
+    def api_source_folders(x_auth_token: str | None = Header(default=None)):
+        require_user(x_auth_token)
+        raw_source_paths: list[dict] = []
+        if config_path.exists():
+            try:
+                raw_source_paths = json.loads(config_path.read_text(encoding="utf-8")).get("source_paths", [])
+            except Exception:
+                pass
+        results = []
+        for sp in raw_source_paths:
+            path = sp.get("path", "")
+            label = sp.get("label") or os.path.basename(path.rstrip("/\\"))
+            if not path or not os.path.isdir(path):
+                continue
+            results.append({"path": path, "label": label, "is_root": True})
+            try:
+                for entry in sorted(os.scandir(path), key=lambda e: e.name):
+                    if entry.is_dir():
+                        results.append({
+                            "path": entry.path,
+                            "label": entry.name,
+                            "is_root": False,
+                        })
+            except PermissionError:
+                pass
+        return results
+
     @app.post("/api/index/start")
     def api_index_start(req: IndexRequest, x_auth_token: str | None = Header(default=None)):
         require_admin(x_auth_token)
@@ -666,8 +711,18 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             raise HTTPException(status_code=404, detail="Job not found")
         return job.__dict__
 
-    
-    
+    @app.get("/api/index/extensions")
+    def api_index_extensions(x_auth_token: str | None = Header(default=None)):
+        require_user(x_auth_token)
+        db = store()
+        rows = db.conn.execute(
+            "SELECT extension, COUNT(*) AS cnt FROM documents "
+            "GROUP BY extension ORDER BY cnt DESC"
+        ).fetchall()
+        return [row["extension"] for row in rows if row["extension"]]
+
+
+
     @app.get("/api/update/check")
     def api_check_update(x_auth_token: str | None = Header(default=None)):
         require_admin(x_auth_token)
