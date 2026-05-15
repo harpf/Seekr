@@ -181,14 +181,14 @@
               <li>An automation that fires on query changes and shows results as a persistent notification</li>
             </ul>
             <p>Minimal example:</p>
-            <pre><code>rest_command:
+            <pre><code>{% raw %}rest_command:
   seekr_search:
     url: "https://seekr.yourdomain.local/api/ha/search"
     method: POST
     headers:
       Content-Type: application/json
       X-Api-Key: !secret seekr_api_key
-    payload: '{"query": "{{ query }}", "limit": 5}'</code></pre>
+    payload: '{"query": "{{ query }}", "limit": 5}'{% endraw %}</code></pre>
 
             <h3 id="ha-answer">Answer &amp; Sources in the Response</h3>
             <p>The <code>POST /api/ha/search</code> response includes:</p>
