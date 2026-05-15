@@ -22,3 +22,14 @@ def test_build_match_query_wildcard_returns_none():
 def test_build_match_query_whitespace_only_returns_none():
     result = build_match_query("   ", filetype=None, path_filter=None, block_type=None)
     assert result is None
+
+
+def test_build_match_query_comma_separated_extensions():
+    q = build_match_query("report", filetype="pdf,docx", path_filter=None, block_type=None)
+    assert "(extension:pdf OR extension:docx)" in q
+
+
+def test_build_match_query_single_extension_no_dot():
+    q = build_match_query("report", filetype=".pdf", path_filter=None, block_type=None)
+    assert "extension:pdf" in q
+    assert "OR" not in q
