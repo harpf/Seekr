@@ -198,13 +198,13 @@
               <li><strong><code>results</code></strong> — full result objects including <code>snippet</code>, <code>extension</code>, and <code>block_type</code>.</li>
             </ul>
             <p>Example automation message using the answer:</p>
-            <pre><code>message: >
+            <pre><code>{% raw %}message: >
   {% if r.content.answer %}{{ r.content.answer }}{% endif %}
 
   Sources:
   {% for s in r.content.sources %}
   • {{ s.filename }} ({{ s.modified_at }})
-  {% endfor %}</code></pre>
+  {% endfor %}{% endraw %}</code></pre>
           </section>
 
           <!-- API Reference -->
