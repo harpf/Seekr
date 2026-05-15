@@ -4,9 +4,20 @@ async function api(path, method = 'GET', body = null) {
   const headers = { 'X-Auth-Token': token ?? '' };
   if (body !== null) headers['Content-Type'] = 'application/json';
   const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : null });
+  if (res.status === 401) {
+    showToast('Session expired — please sign in again', 'err');
+    // Re-show auth gate on the config page
+    const configPanel = document.getElementById('configPanel');
+    const authGate = document.getElementById('authGate');
+    if (configPanel) configPanel.classList.add('hidden');
+    if (authGate) authGate.classList.remove('hidden');
+    throw new Error('Unauthorized');
+  }
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `Request failed (${res.status})`);
+    let msg = text;
+    try { msg = JSON.parse(text)?.detail ?? text; } catch (_) {}
+    throw new Error(msg || `Request failed (${res.status})`);
   }
   return await res.json();
 }
