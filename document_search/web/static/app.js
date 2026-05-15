@@ -275,41 +275,187 @@ async function runSearch() {
       return;
     }
 
-    resultsEl.innerHTML = data.map(r => `
-      <div class="rc">
-        <div class="rc-name">${escHtml(r.filename)}${r.is_marked ? ' ⭐' : ''}</div>
-        <div class="rc-badges">
-          <span class="badge badge-n">${escHtml(r.block_type)}</span>
-          <span class="badge badge-n">Block ${r.block_number}</span>
-          ${r.tags?.length ? `<span class="badge badge-b">${escHtml(r.tags.join(', '))}</span>` : ''}
-        </div>
-        <div class="rc-path">${escHtml(r.path)}</div>
-        <div class="rc-snippet">${r.snippet_html ?? ''}</div>
-        <div class="rc-foot">
-          <input id="tags-${r.document_id}" value="${escHtml((r.tags || []).join(', '))}" placeholder="tag1, tag2" />
-          <button class="btn btn-g btn-sm" onclick="saveTags(${r.document_id})">Save tags</button>
-          <button class="btn btn-g btn-sm" onclick="toggleMark(${r.document_id}, ${!!r.is_marked})">
-            ${r.is_marked ? 'Unmark' : 'Mark'}
-          </button>
-          <button class="btn btn-g btn-sm" onclick="reindexDocumentFromSearch(${r.document_id})">Reindex</button>
-          <a href="${r.open_url}" target="_blank" class="btn btn-g btn-sm">Open file</a>
-        </div>
-      </div>`).join('');
+    renderResults(data);
   } catch (e) {
     if (resultsEl) resultsEl.textContent = e.message;
   }
 }
 
 async function saveTags(documentId) {
-  const input = document.getElementById(`tags-${documentId}`);
-  const tags = input.value.split(',').map(s => s.trim()).filter(Boolean);
+  const chip = _resultTagChips[documentId];
+  const tags = chip ? chip.values() : [];
   await api('/api/documents/tags', 'POST', { document_id: documentId, tags });
   showToast('Tags saved', 'ok');
 }
 
 async function toggleMark(documentId, current) {
   await api('/api/documents/mark', 'POST', { document_id: documentId, is_marked: !current });
-  await runSearch();
+  showToast(current ? 'Unmarked' : 'Marked', 'ok');
+}
+
+function buildHitEl(hit) {
+  const div = document.createElement('div');
+  div.className = 'rc-hit';
+
+  const label = document.createElement('span');
+  label.className = 'rc-hit-label';
+  label.textContent = `${hit.block_type} ${hit.block_number}`;
+
+  const body = document.createElement('span');
+  if (hit.snippet_html) {
+    body.insertAdjacentHTML('beforeend', hit.snippet_html);
+  } else {
+    body.textContent = '—';
+  }
+
+  div.appendChild(label);
+  div.appendChild(body);
+  return div;
+}
+
+const HITS_SHOW_MAX = 5;
+
+function renderResults(docs) {
+  const el = document.getElementById('results');
+  if (!el) return;
+  el.replaceChildren();
+
+  docs.forEach(doc => {
+    const card = document.createElement('div');
+    card.className = 'rc';
+
+    // Head: filename link + star button
+    const head = document.createElement('div');
+    head.className = 'rc-head';
+    const nameLink = document.createElement('a');
+    nameLink.className = 'rc-name';
+    nameLink.href = doc.open_url;
+    nameLink.target = '_blank';
+    nameLink.textContent = doc.filename;
+    const starBtn = document.createElement('button');
+    starBtn.className = 'star-btn' + (doc.is_marked ? ' marked' : '');
+    starBtn.title = doc.is_marked ? 'Unmark' : 'Mark';
+    starBtn.textContent = '★';
+    starBtn.addEventListener('click', () => toggleMark(doc.document_id, doc.is_marked));
+    head.appendChild(nameLink);
+    head.appendChild(starBtn);
+    card.appendChild(head);
+
+    // Badges: extension, hit count, tags
+    const badges = document.createElement('div');
+    badges.className = 'rc-badges';
+    const extBadge = document.createElement('span');
+    extBadge.className = 'badge badge-n';
+    extBadge.textContent = doc.extension;
+    badges.appendChild(extBadge);
+    const hitsBadge = document.createElement('span');
+    hitsBadge.className = 'badge badge-n';
+    hitsBadge.textContent = `${doc.hit_count} hit${doc.hit_count !== 1 ? 's' : ''}`;
+    badges.appendChild(hitsBadge);
+    doc.tags.forEach(t => {
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip';
+      chip.textContent = t;
+      chip.addEventListener('click', () => filterByTag(t));
+      badges.appendChild(chip);
+    });
+    card.appendChild(badges);
+
+    // Path
+    const pathEl = document.createElement('div');
+    pathEl.className = 'rc-path';
+    pathEl.textContent = doc.path;
+    card.appendChild(pathEl);
+
+    // Hits list
+    const hitsEl = document.createElement('div');
+    hitsEl.className = 'rc-hits';
+    hitsEl.id = `hits-${doc.document_id}`;
+    doc.hits.slice(0, HITS_SHOW_MAX).forEach(h => hitsEl.appendChild(buildHitEl(h)));
+    card.appendChild(hitsEl);
+
+    const extra = doc.hits.slice(HITS_SHOW_MAX);
+    if (extra.length) {
+      const moreBtn = document.createElement('button');
+      moreBtn.className = 'rc-more-btn';
+      moreBtn.textContent = `Show ${extra.length} more hit${extra.length !== 1 ? 's' : ''}`;
+      moreBtn.addEventListener('click', () => {
+        extra.forEach(h => hitsEl.appendChild(buildHitEl(h)));
+        moreBtn.remove();
+      });
+      card.appendChild(moreBtn);
+    }
+
+    // Footer: chip tag editor + action buttons
+    const foot = document.createElement('div');
+    foot.className = 'rc-foot';
+
+    const tagWrap = document.createElement('div');
+    tagWrap.className = 'chip-wrap';
+    tagWrap.id = `tagWrap-${doc.document_id}`;
+    const tagInput = document.createElement('input');
+    tagInput.className = 'chip-input';
+    tagInput.id = `tagInput-${doc.document_id}`;
+    tagInput.placeholder = 'add tag…';
+    tagInput.setAttribute('list', 'globalTagList');
+    tagInput.setAttribute('autocomplete', 'off');
+    tagWrap.appendChild(tagInput);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn btn-g btn-sm';
+    saveBtn.textContent = 'Save tags';
+    saveBtn.addEventListener('click', () => saveTags(doc.document_id));
+
+    const markBtn = document.createElement('button');
+    markBtn.className = 'btn btn-g btn-sm';
+    markBtn.textContent = doc.is_marked ? 'Unmark' : 'Mark';
+    markBtn.addEventListener('click', () => toggleMark(doc.document_id, doc.is_marked));
+
+    const reindexBtn = document.createElement('button');
+    reindexBtn.className = 'btn btn-g btn-sm';
+    reindexBtn.textContent = 'Reindex';
+    reindexBtn.addEventListener('click', () => reindexDocumentFromSearch(doc.document_id));
+
+    const openLink = document.createElement('a');
+    openLink.className = 'btn btn-g btn-sm';
+    openLink.href = doc.open_url;
+    openLink.target = '_blank';
+    openLink.textContent = 'Open file';
+
+    foot.appendChild(tagWrap);
+    foot.appendChild(saveBtn);
+    foot.appendChild(markBtn);
+    foot.appendChild(reindexBtn);
+    foot.appendChild(openLink);
+    card.appendChild(foot);
+
+    el.appendChild(card);
+
+    // Init per-card ChipInput after DOM insertion
+    requestAnimationFrame(() => {
+      const wrap = document.getElementById(`tagWrap-${doc.document_id}`);
+      const inp = document.getElementById(`tagInput-${doc.document_id}`);
+      if (wrap && inp) {
+        _resultTagChips[doc.document_id] = new ChipInput(wrap, inp, null);
+        _resultTagChips[doc.document_id].setValues(doc.tags);
+      }
+    });
+  });
+
+  // Ensure shared datalist for tag autocomplete
+  if (!document.getElementById('globalTagList')) {
+    const dl = document.createElement('datalist');
+    dl.id = 'globalTagList';
+    document.body.appendChild(dl);
+    api('/api/tags').then(tags => {
+      if (!tags) return;
+      tags.forEach(t => {
+        const o = document.createElement('option');
+        o.value = t.name || String(t);
+        dl.appendChild(o);
+      });
+    }).catch(() => {});
+  }
 }
 
 // ── Ingest ─────────────────────────────────────────────────────────
