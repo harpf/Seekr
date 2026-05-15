@@ -120,13 +120,16 @@
             <div class="f-grid" style="margin-top:.875rem;">
               <div class="f-col">
                 <label class="f-label" for="uploadPath">Target subpath</label>
-                <input id="uploadPath" placeholder="incoming/2026" />
+                <input id="uploadPath" placeholder="incoming/2026" list="uploadFolderList" autocomplete="off" />
+                <datalist id="uploadFolderList"></datalist>
                 <span class="f-hint">Destination folder within the index root</span>
               </div>
               <div class="f-col">
-                <label class="f-label" for="uploadTags">Tags</label>
-                <input id="uploadTags" placeholder="invoice, customer-a" />
-                <span class="f-hint">Comma-separated tag list</span>
+                <label class="f-label">Tags</label>
+                <div class="chip-wrap" id="uploadTagsWrap">
+                  <input id="uploadTagsInput" class="chip-input" placeholder="add tag…" list="uploadTagList" autocomplete="off" />
+                  <datalist id="uploadTagList"></datalist>
+                </div>
               </div>
               <div class="f-col f-full">
                 <label class="f-label" for="uploadMeta">Metadata JSON</label>
@@ -181,9 +184,10 @@
           <div class="card-body">
             <div class="f-grid" style="grid-template-columns:1fr;">
               <div class="f-col">
-                <label class="f-label" for="paths">Paths to index</label>
-                <input id="paths" placeholder="/documents, /archive/2025" />
-                <span class="f-hint">Comma-separated absolute paths</span>
+                <label class="f-label">Paths to index</label>
+                <select id="pathsSelect" multiple size="6" style="width:100%;font-size:.875rem;">
+                  <option disabled value="">Loading source folders…</option>
+                </select>
               </div>
             </div>
             <div class="btn-row">

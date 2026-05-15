@@ -191,6 +191,15 @@ async function login() {
       await loadFilterOptions();
       await loadTagCloud();
     }
+    if (document.body?.dataset?.page === 'ingest') {
+      chipUploadTags = new ChipInput(
+        document.getElementById('uploadTagsWrap'),
+        document.getElementById('uploadTagsInput'),
+        document.getElementById('uploadTagList'),
+      );
+      initDropZone();
+      await loadIngestOptions();
+    }
   } catch (error) {
     setText('loginResult', `Login failed: ${error.message}`, 'err');
   }
@@ -499,7 +508,7 @@ async function uploadDocument() {
   const fd = new FormData();
   fd.append('file', f);
   fd.append('target_subpath', uploadPath.value || '');
-  fd.append('tags', uploadTags.value || '');
+  fd.append('tags', chipUploadTags?.values().join(',') || '');
   fd.append('metadata_json', uploadMeta.value || '{}');
   try {
     const res = await fetch('/api/upload', { method: 'POST', headers: { 'X-Auth-Token': token ?? '' }, body: fd });
@@ -679,6 +688,13 @@ async function applySelectedMoves() {
 }
 
 async function startIndex() {
+  const selectedPaths = Array.from(
+    document.getElementById('pathsSelect')?.selectedOptions ?? []
+  ).map(o => o.value).filter(Boolean);
+  if (!selectedPaths.length) {
+    showToast('Select at least one folder to index.', 'err');
+    return;
+  }
   const btn = document.getElementById('startIndexBtn');
   const progressWrap = document.getElementById('indexProgress');
   const progressFill = document.getElementById('indexProgressFill');
@@ -690,7 +706,7 @@ async function startIndex() {
     if (progressStatus) progressStatus.textContent = 'Starting job…';
 
     const data = await api('/api/index/start', 'POST', {
-      paths: paths.value.split(',').map(s => s.trim()).filter(Boolean),
+      paths: selectedPaths,
     });
     const id = data.job_id;
     if (progressStatus) progressStatus.textContent = `Job ${id} started`;
@@ -1700,7 +1716,6 @@ function initSearchPage() {
 async function bootstrap() {
   initNav();
   renderRecentSearches();
-  initDropZone();
 
   if (document.body?.dataset?.page === 'search') {
     initSearchPage();
@@ -1727,6 +1742,15 @@ async function bootstrap() {
       await loadTagCloud();
       const q = new URLSearchParams(location.search).get('q');
       if (q) await runSearch();
+    }
+    if (document.body?.dataset?.page === 'ingest') {
+      chipUploadTags = new ChipInput(
+        document.getElementById('uploadTagsWrap'),
+        document.getElementById('uploadTagsInput'),
+        document.getElementById('uploadTagList'),
+      );
+      initDropZone();
+      await loadIngestOptions();
     }
   }
 }
@@ -1758,6 +1782,56 @@ async function loadFilterOptions() {
     ]);
     chipFiletype?.setOptions(exts || []);
     chipTagFilter?.setOptions((tags || []).map(t => t.name || String(t)));
+  } catch (_) {}
+}
+
+async function loadIngestOptions() {
+  try {
+    const [tags, folders, sourceFolders] = await Promise.all([
+      api('/api/tags'),
+      api('/api/folders'),
+      api('/api/source-folders'),
+    ]);
+
+    chipUploadTags?.setOptions((tags || []).map(t => t.name || String(t)));
+
+    const folderList = document.getElementById('uploadFolderList');
+    if (folderList) {
+      (folders || []).forEach(f => {
+        const o = document.createElement('option');
+        o.value = f;
+        folderList.appendChild(o);
+      });
+    }
+
+    const sel = document.getElementById('pathsSelect');
+    if (!sel) return;
+    sel.replaceChildren();
+    const roots = (sourceFolders || []).filter(f => f.is_root);
+    if (!roots.length) {
+      const opt = document.createElement('option');
+      opt.disabled = true;
+      opt.textContent = 'No source folders configured — add them in Config';
+      sel.appendChild(opt);
+    } else {
+      roots.forEach(root => {
+        const grp = document.createElement('optgroup');
+        grp.label = root.label;
+        const rootOpt = document.createElement('option');
+        rootOpt.value = root.path;
+        rootOpt.textContent = `${root.label} (root)`;
+        grp.appendChild(rootOpt);
+        sourceFolders
+          .filter(f => !f.is_root && f.path.startsWith(root.path + '/'))
+          .forEach(sub => {
+            const opt = document.createElement('option');
+            opt.value = sub.path;
+            opt.textContent = sub.label;
+            grp.appendChild(opt);
+          });
+        sel.appendChild(grp);
+      });
+    }
   } catch (_) {}
 }
 
