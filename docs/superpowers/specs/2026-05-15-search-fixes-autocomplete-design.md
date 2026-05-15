@@ -47,7 +47,7 @@ if (Array.isArray(detail)) {
 
 **Fix (backend):** In `api_index_start`, reject any path that is `/` or starts with `/proc`, `/sys`, `/dev` with HTTP 400 and a clear message.
 
-**Fix (frontend):** On ingest page load, call `GET /api/config` and pre-populate the paths input with the configured `source_paths[].path` values (joined by `, `). User can still edit before submitting.
+**Fix (frontend):** Replace the free-text paths input with a `<select multiple>` dropdown populated from `GET /api/source-folders` (see Section 2.3). Each option is either a configured source root or a direct subdirectory of one. The user selects one or more entries; the selected paths are sent as the `paths` array to `/api/index/start`.
 
 ---
 
@@ -74,6 +74,28 @@ Returns existing subdirectories inside the upload root (`DOCUMENT_SEARCH_UPLOAD_
 ```
 
 **Implementation:** `os.walk(upload_root)` limited to depth 2, yielding relative directory paths. Returns `[]` gracefully if upload root does not exist.
+
+### 2.3 `GET /api/source-folders`
+
+Returns the configured source paths and their immediate subdirectories, for use in the ingest path selector. Requires session token.
+
+**Response:**
+```json
+[
+  { "path": "/mnt/windows-docs", "label": "Windows Share", "is_root": true },
+  { "path": "/mnt/windows-docs/invoices", "label": "invoices", "is_root": false },
+  { "path": "/mnt/windows-docs/reports", "label": "reports", "is_root": false },
+  { "path": "/documents", "label": "Documents", "is_root": true }
+]
+```
+
+**Implementation:**
+1. Read `source_paths` from config.
+2. For each configured path that exists on disk, yield it as a root entry (using its configured `label` or path basename).
+3. List its immediate subdirectories (`os.scandir`, one level deep) and yield each as a non-root entry.
+4. Skip paths that do not exist on disk (mount not active). Returns `[]` if no source paths are configured.
+
+**Frontend rendering:** `<select multiple>` with `<optgroup label="…">` per source root, containing its subdirectories as `<option>` entries. The root itself is always selectable (as the first option inside its optgroup). Height is capped at ~8 visible rows.
 
 ---
 
@@ -195,7 +217,7 @@ A reusable component managing a set of string values rendered as dismissible chi
 | Search results | Tag editor per card | ChipInput (multi, pre-filled) | existing tags from result data |
 | Upload (Ingest) | Tags | ChipInput (multi) | `GET /api/tags` after login |
 | Upload (Ingest) | Target folder | plain `<input>` + `<datalist>` | `GET /api/folders` after login |
-| Ingest | Paths to index | plain `<input>` pre-populated | `GET /api/config` source_paths on load |
+| Ingest | Paths to index | `<select multiple>` with optgroups | `GET /api/source-folders` after login |
 
 The folder field is a single-value text input with browser-native datalist autocomplete (free text accepted; new folders are created by the existing upload handler).
 
@@ -204,7 +226,7 @@ The folder field is a single-value text input with browser-native datalist autoc
 - `runSearch()`: `filetype` → `chipInputFiletype.values().join(',') || null`; `tags` → `chipInputTagFilter.values()` (array, may be empty).
 - `saveTags(documentId)`: reads from ChipInput in the result card instead of a plain text input.
 - `uploadDocument()`: tags → `chipInputUploadTags.values().join(',')`.
-- `startIndex()`: paths value read from pre-populated input as before.
+- `startIndex()`: paths read from all selected `<option>` values in the `<select multiple>` element.
 
 ---
 
