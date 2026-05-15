@@ -7,6 +7,7 @@ import ipaddress
 import os
 import re
 import secrets
+import sqlite3
 import threading
 import uuid
 import time
@@ -102,14 +103,14 @@ class IndexRequest(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    query: str = Field(min_length=1)
+    query: str = ""
+    tags: list[str] = Field(default_factory=list)
     limit: int = 20
     filetype: str | None = None
     path: str | None = None
     block_type: str | None = None
     modified_from: str | None = None
     modified_to: str | None = None
-    tag: str | None = None
 
 
 
@@ -1420,7 +1421,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     def api_search(req: SearchRequest, x_auth_token: str | None = Header(default=None)):
         user_id = require_user(x_auth_token)
         db = store()
-        rows = search(db, req.query, req.limit, req.filetype, req.path, req.block_type, req.modified_from, req.modified_to, req.tag, user_id)
+        rows = search(db, req.query, req.limit, req.filetype, req.path, req.block_type, req.modified_from, req.modified_to, req.tags, user_id)
         payload = [dict(r) for r in rows]
         marks = db.get_doc_marks_and_tags(user_id, [r["document_id"] for r in payload])
         for item in payload:
