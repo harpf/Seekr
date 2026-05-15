@@ -472,8 +472,6 @@ pre.out {
 /* ── Path list ────────────────────────────────────── */
 .path-list { margin-bottom: .5rem; }
 
-.gap-top { margin-top: 1.25rem; }
-
 code {
   background: var(--overlay); border: 1px solid var(--b-lo);
   border-radius: 3px; padding: 1px 5px;
