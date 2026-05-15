@@ -1,4 +1,4 @@
-# Design: Search Fixes + Smart Autocomplete
+# Design: Search Fixes + Smart Autocomplete + Grouped Results
 
 **Date:** 2026-05-15  
 **Status:** Approved
@@ -7,7 +7,7 @@
 
 ## Overview
 
-Fixes four bugs in search and indexing, adds two backend endpoints, and introduces a reusable chip-input component wired across search filters, upload form, and the ingest page.
+Fixes four bugs in search and indexing, adds two backend endpoints, introduces a reusable chip-input component, upgrades the tag filter to multi-tag (AND logic), and redesigns search results to group all matching snippets per document with full hit highlighting.
 
 ---
 
@@ -77,9 +77,99 @@ Returns existing subdirectories inside the upload root (`DOCUMENT_SEARCH_UPLOAD_
 
 ---
 
-## Section 3: Frontend — Chip Input Component + Wiring
+## Section 3: Multi-Tag Search (AND Logic)
 
-### 3.1 ChipInput Component (`app.js`)
+### 3.1 Backend Changes
+
+`SearchRequest.tag: str | None` → `SearchRequest.tags: list[str]` (default `[]`).
+
+`search()` in `search_service.py`: when `tags` is non-empty, filter documents to those that carry **all** specified tags (AND semantics):
+
+```sql
+AND d.id IN (
+    SELECT dt.document_id
+    FROM document_tags dt
+    JOIN user_tags ut ON ut.id = dt.tag_id
+    WHERE dt.user_id = ? AND ut.name IN (?, ?, ...)
+    GROUP BY dt.document_id
+    HAVING COUNT(DISTINCT ut.name) = <len(tags)>
+)
+```
+
+Parameters: `user_id` followed by each tag name (lowercased/stripped), then `len(tags)` for the HAVING clause.
+
+`api_search` passes `req.tags` (list) instead of `req.tag`.
+
+### 3.2 Frontend
+
+Tag filter in search becomes a **ChipInput** (multi-value). Each chip is an individual tag. `runSearch()` sends `tags: chipInputTagFilter.values()` (array). Empty array = no tag filter.
+
+---
+
+## Section 4: Grouped Search Results with Full Hit Highlighting
+
+### 4.1 Backend — Grouped Response Shape
+
+`api_search` groups the flat per-block rows by `document_id` before returning. The response changes from a flat list to a list of document objects, each containing all matching hits:
+
+```json
+[
+  {
+    "document_id": 42,
+    "filename": "report.pdf",
+    "path": "/mnt/windows-docs/report.pdf",
+    "extension": ".pdf",
+    "modified_at": "2026-03-01T10:00:00",
+    "is_marked": false,
+    "tags": ["invoice"],
+    "open_url": "/api/files/open?document_id=42",
+    "hit_count": 3,
+    "hits": [
+      { "block_type": "page", "block_number": 1, "snippet_html": "...highlighted..." },
+      { "block_type": "page", "block_number": 5, "snippet_html": "...highlighted..." },
+      { "block_type": "table", "block_number": 2, "snippet_html": "...highlighted..." }
+    ]
+  }
+]
+```
+
+Documents are ordered by best FTS5 rank across their hits (lowest rank = best match first). The existing `highlight_terms()` function is applied to each snippet individually.
+
+### 4.2 Backend — Fallback (browse-all) Shape
+
+When query is empty/`*`, the fallback plain SQL path returns rows without FTS snippets. Each hit gets `snippet_html: null` and `block_type`/`block_number` from `content_blocks`. Results are ordered by `d.modified_at DESC`.
+
+### 4.3 Frontend — Result Card Redesign
+
+One card per document. Each card shows:
+
+```
+┌─ report.pdf ────────────────────────────────── ⭐? ─┐
+│ /mnt/windows-docs/report.pdf    .pdf  3 hits         │
+│ [invoice] [customer-a]                               │
+│                                                      │
+│ [page 1]   …the quick brown fox jumped over…         │
+│ [page 5]   …as brown as the earth beneath…           │
+│ [table 2]  …a brown-colored material was found…      │
+│                                                      │
+│ [Save tags ▾]  [Mark]  [Reindex]  [Open file]        │
+└──────────────────────────────────────────────────────┘
+```
+
+- Filename is a link (same as Open file).
+- Hit snippets are shown in a compact list, each prefixed with a `[block_type N]` label.
+- If `snippet_html` is null (browse-all mode), show a placeholder "—" for that hit.
+- The tag editor (currently an inline `<input>`) stays in the card footer, but becomes a ChipInput using the same component as the upload form — so existing tags are pre-filled as chips and saving replaces them.
+
+### 4.4 Snippet Limit per Document
+
+Show at most **5 hits** per document card by default. If `hit_count > 5`, show a "Show N more hits" expander that reveals the rest inline (no network call needed — all hits are already in the response).
+
+---
+
+## Section 5: Frontend — Chip Input Component + Wiring
+
+### 5.1 ChipInput Component (`app.js`)
 
 A reusable component managing a set of string values rendered as dismissible chips.
 
@@ -89,34 +179,36 @@ A reusable component managing a set of string values rendered as dismissible chi
 - Each chip renders as `value ×`; clicking × removes it.
 - `ChipInput.values()` returns the current array of strings for use in API payloads.
 - `ChipInput.setOptions(arr)` replaces the datalist options.
+- `ChipInput.setValues(arr)` pre-populates chips (used to pre-fill tags in the result card editor).
 
 **CSS additions to `styles.css`:**
 - `.chip-wrap` — flex container with wrap, gap, border, and padding matching existing `.f-col` inputs.
 - `.chip` — pill shape using existing `--accent` / `--bg-2` tokens, with a small × button.
 - `.chip-input` — borderless input inside the wrap that grows to fill remaining space.
 
-### 3.2 Wiring
+### 5.2 Wiring
 
 | Page | Field | Component | Data source |
 |---|---|---|---|
 | Search | File type filter | ChipInput (multi) | `GET /api/index/extensions` on filter open |
-| Search | Tag filter | plain `<input>` + `<datalist>` (single value) | `GET /api/tags` on filter open |
+| Search | Tag filter | ChipInput (multi) | `GET /api/tags` on filter open |
+| Search results | Tag editor per card | ChipInput (multi, pre-filled) | existing tags from result data |
 | Upload (Ingest) | Tags | ChipInput (multi) | `GET /api/tags` after login |
 | Upload (Ingest) | Target folder | plain `<input>` + `<datalist>` | `GET /api/folders` after login |
 | Ingest | Paths to index | plain `<input>` pre-populated | `GET /api/config` source_paths on load |
 
-The tag filter in search is a single-value field (backend supports one tag at a time), so it uses a plain datalist rather than ChipInput to avoid implying multiple tags work. The folder field is also a single-value text input with browser-native datalist autocomplete (free text accepted; new folders are created by the existing upload handler).
+The folder field is a single-value text input with browser-native datalist autocomplete (free text accepted; new folders are created by the existing upload handler).
 
-### 3.3 API Payload Changes
+### 5.3 API Payload Changes
 
-- `runSearch()`: `filetype` becomes `chipInputFiletype.values().join(',') || null`; tag filter stays as a single plain input value.
-- `uploadDocument()`: tags become `chipInputUploadTags.values().join(',')`.
+- `runSearch()`: `filetype` → `chipInputFiletype.values().join(',') || null`; `tags` → `chipInputTagFilter.values()` (array, may be empty).
+- `saveTags(documentId)`: reads from ChipInput in the result card instead of a plain text input.
+- `uploadDocument()`: tags → `chipInputUploadTags.values().join(',')`.
 - `startIndex()`: paths value read from pre-populated input as before.
 
 ---
 
 ## Out of Scope
 
-- Multi-tag search filtering (backend currently supports one tag at a time).
 - Persistent filter state across page reloads.
-- Server-side folder creation endpoint (already handled implicitly by the upload endpoint).
+- Server-side folder creation endpoint (handled implicitly by the existing upload endpoint).
