@@ -1,3 +1,70 @@
+class ChipInput {
+  constructor(wrapEl, inputEl, datalistEl) {
+    this._wrap = wrapEl;
+    this._input = inputEl;
+    this._datalist = datalistEl;
+    this._vals = [];
+    this._input.addEventListener('keydown', e => {
+      if ((e.key === 'Enter' || e.key === ',') && this._input.value.trim()) {
+        e.preventDefault();
+        this.add(this._input.value.trim().replace(/,$/, ''));
+        this._input.value = '';
+      }
+      if (e.key === 'Backspace' && !this._input.value && this._vals.length) {
+        this.remove(this._vals[this._vals.length - 1]);
+      }
+    });
+    this._wrap.addEventListener('click', () => this._input.focus());
+  }
+
+  add(val) {
+    val = val.trim();
+    if (!val || this._vals.includes(val)) return;
+    this._vals.push(val);
+    this._renderChips();
+  }
+
+  remove(val) {
+    this._vals = this._vals.filter(v => v !== val);
+    this._renderChips();
+  }
+
+  _renderChips() {
+    this._wrap.querySelectorAll('.chip').forEach(el => el.remove());
+    this._vals.forEach(v => {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.textContent = v;
+      const x = document.createElement('span');
+      x.className = 'chip-x';
+      x.textContent = '×';
+      x.addEventListener('click', ev => { ev.stopPropagation(); this.remove(v); });
+      chip.appendChild(x);
+      this._wrap.insertBefore(chip, this._input);
+    });
+  }
+
+  values() { return [...this._vals]; }
+
+  setOptions(arr) {
+    if (!this._datalist) return;
+    this._datalist.replaceChildren(
+      ...arr.map(v => {
+        const o = document.createElement('option');
+        o.value = String(v);
+        return o;
+      })
+    );
+  }
+
+  setValues(arr) {
+    this._vals = [];
+    arr.forEach(v => this.add(v));
+  }
+
+  clear() { this.setValues([]); }
+}
+
 let token = localStorage.getItem('documentSearchToken');
 
 async function api(path, method = 'GET', body = null) {

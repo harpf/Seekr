@@ -8,6 +8,7 @@
   --surface:  #ffffff;
   --overlay:  #f1f4f8;
   --elevated: #ffffff;
+  --bg-2:     #f1f4f8;
   --b-lo:     #e2e8f0;
   --b-md:     #cbd5e1;
   --b-hi:     #94a3b8;
@@ -507,6 +508,80 @@ code {
   border-radius: 99px;
   background: var(--overlay);
   font-size: .68rem; color: var(--txt-3);
+}
+
+/* ── ChipInput ── */
+.chip-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+  align-items: center;
+  min-height: 2.25rem;
+  padding: .3rem .5rem;
+  border: 1px solid var(--b-md);
+  border-radius: var(--r2);
+  background: var(--surface);
+  cursor: text;
+}
+.chip-wrap:focus-within {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  padding: .15rem .45rem;
+  border-radius: 999px;
+  background: var(--blue-a);
+  color: var(--blue);
+  font-size: .8rem;
+  white-space: nowrap;
+}
+.chip-x {
+  cursor: pointer;
+  font-size: .9rem;
+  line-height: 1;
+  opacity: .7;
+}
+.chip-x:hover { opacity: 1; }
+.chip-input {
+  flex: 1;
+  min-width: 6rem;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: .875rem;
+  color: var(--txt-1);
+}
+
+/* ── Result hit list ── */
+.rc-hits { margin: .5rem 0 .25rem; }
+.rc-hit {
+  display: flex;
+  gap: .5rem;
+  align-items: baseline;
+  padding: .25rem 0;
+  font-size: .85rem;
+  border-top: 1px solid var(--b-lo);
+}
+.rc-hit-label {
+  flex-shrink: 0;
+  font-size: .72rem;
+  font-weight: 600;
+  color: var(--txt-3);
+  background: var(--bg-2);
+  padding: .1rem .35rem;
+  border-radius: var(--r2);
+  white-space: nowrap;
+}
+.rc-more-btn {
+  font-size: .8rem;
+  color: var(--blue);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: .25rem 0;
 }
 
 /* ── Structure suggestion tree ────────────────────── */
