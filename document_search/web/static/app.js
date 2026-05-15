@@ -20,7 +20,14 @@ async function api(path, method = 'GET', body = null) {
   if (!res.ok) {
     const text = await res.text();
     let msg = text;
-    try { msg = String(JSON.parse(text)?.detail ?? text); } catch (_) {}
+    try {
+      const detail = JSON.parse(text)?.detail;
+      if (Array.isArray(detail)) {
+        msg = detail.map(e => e.msg || String(e)).join('; ');
+      } else {
+        msg = String(detail ?? text);
+      }
+    } catch (_) {}
     throw new Error(msg || `Request failed (${res.status})`);
   }
   return await res.json();
