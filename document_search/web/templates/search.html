@@ -128,9 +128,12 @@
             <div id="filterBody" class="hidden" style="margin-top:.875rem;">
               <div class="f-grid">
                 <div class="f-col">
-                  <label class="f-label" for="filetype">File type</label>
-                  <input id="filetype" placeholder="pdf, docx, pptx, txt" />
-                  <span class="f-hint">Comma-separated or single value</span>
+                  <label class="f-label">File type</label>
+                  <div class="chip-wrap" id="filetypeWrap">
+                    <input id="filetypeInput" class="chip-input" placeholder="pdf, docx…" list="filetypeList" autocomplete="off" />
+                    <datalist id="filetypeList"></datalist>
+                  </div>
+                  <span class="f-hint">Press Enter or comma to add each type</span>
                 </div>
                 <div class="f-col">
                   <label class="f-label" for="pathFilter">Path filter</label>
@@ -157,9 +160,9 @@
                 </div>
                 <div class="f-col f-full">
                   <label class="f-label">Filter by tag</label>
-                  <div id="tagFilterWrap" style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;">
-                    <input id="tagFilterInput" placeholder="tag name" style="width:160px;" />
-                    <button class="btn btn-g btn-sm" onclick="clearTagFilter()">Clear tag</button>
+                  <div class="chip-wrap" id="tagFilterWrap">
+                    <input id="tagFilterInput" class="chip-input" placeholder="tag name…" list="tagFilterList" autocomplete="off" />
+                    <datalist id="tagFilterList"></datalist>
                   </div>
                 </div>
               </div>

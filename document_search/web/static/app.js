@@ -66,6 +66,8 @@ class ChipInput {
 }
 
 let token = localStorage.getItem('documentSearchToken');
+let chipFiletype, chipTagFilter, chipUploadTags;
+const _resultTagChips = {};
 
 async function api(path, method = 'GET', body = null) {
   const headers = { 'X-Auth-Token': token ?? '' };
@@ -175,7 +177,20 @@ async function login() {
     if (data.role === 'admin') showAdminUI();
     await loadStatus();
     if (document.getElementById('configPanel')) await loadConfig();
-    if (document.querySelector('[data-page="search"]')) await loadTagCloud();
+    if (document.body?.dataset?.page === 'search') {
+      chipFiletype = new ChipInput(
+        document.getElementById('filetypeWrap'),
+        document.getElementById('filetypeInput'),
+        document.getElementById('filetypeList'),
+      );
+      chipTagFilter = new ChipInput(
+        document.getElementById('tagFilterWrap'),
+        document.getElementById('tagFilterInput'),
+        document.getElementById('tagFilterList'),
+      );
+      await loadFilterOptions();
+      await loadTagCloud();
+    }
   } catch (error) {
     setText('loginResult', `Login failed: ${error.message}`, 'err');
   }
@@ -219,6 +234,8 @@ function toggleFilters() {
 function clearSearch() {
   const q = document.getElementById('query');
   if (q) { q.value = ''; q.focus(); }
+  chipFiletype?.clear();
+  chipTagFilter?.clear();
   const metaEl = document.getElementById('resultsMeta');
   if (metaEl) metaEl.textContent = '';
   const resultsEl = document.getElementById('results');
@@ -230,12 +247,12 @@ async function runSearch() {
   try {
     const payload = {
       query: query.value, limit: 25,
-      filetype: filetype.value || null,
+      filetype: chipFiletype?.values().join(',') || null,
       path: pathFilter.value || null,
       block_type: blockType.value || null,
       modified_from: modifiedFrom.value || null,
       modified_to: modifiedTo.value || null,
-      tag: document.getElementById('tagFilterInput')?.value?.trim() || null,
+      tags: chipTagFilter?.values() ?? [],
     };
     const data = await api('/api/search', 'POST', payload);
     if (payload.query?.trim()) saveRecentSearch(payload.query);
@@ -1548,6 +1565,17 @@ async function bootstrap() {
     await loadStatus();
     if (document.getElementById('configPanel')) await loadConfig();
     if (document.body?.dataset?.page === 'search') {
+      chipFiletype = new ChipInput(
+        document.getElementById('filetypeWrap'),
+        document.getElementById('filetypeInput'),
+        document.getElementById('filetypeList'),
+      );
+      chipTagFilter = new ChipInput(
+        document.getElementById('tagFilterWrap'),
+        document.getElementById('tagFilterInput'),
+        document.getElementById('tagFilterList'),
+      );
+      await loadFilterOptions();
       await loadTagCloud();
       const q = new URLSearchParams(location.search).get('q');
       if (q) await runSearch();
@@ -1574,17 +1602,21 @@ async function loadTagCloud() {
   } catch (_) {}
 }
 
-function filterByTag(name) {
-  const input = document.getElementById('tagFilterInput');
-  if (input) input.value = name;
-  const filterBody = document.getElementById('filterBody');
-  if (filterBody?.classList.contains('hidden')) toggleFilters();
-  runSearch();
+async function loadFilterOptions() {
+  try {
+    const [exts, tags] = await Promise.all([
+      api('/api/index/extensions'),
+      api('/api/tags'),
+    ]);
+    chipFiletype?.setOptions(exts || []);
+    chipTagFilter?.setOptions((tags || []).map(t => t.name || String(t)));
+  } catch (_) {}
 }
 
-function clearTagFilter() {
-  const input = document.getElementById('tagFilterInput');
-  if (input) input.value = '';
+function filterByTag(name) {
+  chipTagFilter?.setValues([name]);
+  const filterBody = document.getElementById('filterBody');
+  if (filterBody?.classList.contains('hidden')) toggleFilters();
   runSearch();
 }
 
