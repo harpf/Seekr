@@ -638,6 +638,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         if config_path.exists():
             try:
                 raw_source_paths = json.loads(config_path.read_text(encoding="utf-8")).get("source_paths", [])
+                if not isinstance(raw_source_paths, list):
+                    raw_source_paths = []
             except Exception:
                 pass
         results = []
