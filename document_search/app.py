@@ -79,6 +79,10 @@ _API_KEY: str = os.getenv("DOCUMENT_SEARCH_API_KEY", "").strip()
 # Background update job state.
 _update_job: dict = {"status": "idle"}
 
+# Path guard — filesystem roots that must never be indexed.
+_BLOCKED_EXACT = {"/", "/proc", "/sys", "/dev"}
+_BLOCKED_PREFIXES = ("/proc/", "/sys/", "/dev/")
+
 
 def _check_api_key(key: str | None) -> bool:
     """Constant-time comparison to prevent timing attacks on the API key."""
@@ -613,10 +617,9 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     @app.post("/api/index/start")
     def api_index_start(req: IndexRequest, x_auth_token: str | None = Header(default=None)):
         require_admin(x_auth_token)
-        _BLOCKED_EXACT = {"/", "/proc", "/sys", "/dev"}
-        _BLOCKED_PREFIXES = ("/proc/", "/sys/", "/dev/")
         for p in req.paths:
-            norm = posixpath.normpath(p)
+            # Normalize to canonical POSIX path and collapse any leading double-slashes
+            norm = "/" + posixpath.normpath(p).lstrip("/")
             if norm in _BLOCKED_EXACT or norm.startswith(_BLOCKED_PREFIXES):
                 raise HTTPException(
                     status_code=400,
