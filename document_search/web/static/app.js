@@ -283,7 +283,8 @@ async function runSearch() {
 
 async function saveTags(documentId) {
   const chip = _resultTagChips[documentId];
-  const tags = chip ? chip.values() : [];
+  if (!chip) { showToast('Tag editor not ready', 'err'); return; }
+  const tags = chip.values();
   await api('/api/documents/tags', 'POST', { document_id: documentId, tags });
   showToast('Tags saved', 'ok');
 }
@@ -319,6 +320,7 @@ function renderResults(docs) {
   const el = document.getElementById('results');
   if (!el) return;
   el.replaceChildren();
+  for (const k in _resultTagChips) delete _resultTagChips[k];
 
   docs.forEach(doc => {
     const card = document.createElement('div');
