@@ -5,6 +5,7 @@ import hashlib
 import html
 import ipaddress
 import os
+import posixpath
 import re
 import secrets
 import sqlite3
@@ -612,6 +613,15 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     @app.post("/api/index/start")
     def api_index_start(req: IndexRequest, x_auth_token: str | None = Header(default=None)):
         require_admin(x_auth_token)
+        _BLOCKED_EXACT = {"/", "/proc", "/sys", "/dev"}
+        _BLOCKED_PREFIXES = ("/proc/", "/sys/", "/dev/")
+        for p in req.paths:
+            norm = posixpath.normpath(p)
+            if norm in _BLOCKED_EXACT or norm.startswith(_BLOCKED_PREFIXES):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Path '{p}' is not allowed. Select a specific subdirectory.",
+                )
         cfg: AppConfig = load_config(Path(req.config_path)) if req.config_path else load_effective_config()
         job_id = uuid.uuid4().hex
         jobs[job_id] = JobState(status="running")
