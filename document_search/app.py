@@ -6,6 +6,7 @@ import html
 import ipaddress
 import os
 import re
+import secrets
 import threading
 import uuid
 import time
@@ -69,6 +70,17 @@ _RATE_LIMIT_WINDOW = 300   # seconds (5 min)
 
 # Username / password validation.
 _USERNAME_RE = re.compile(r'^[a-zA-Z0-9_\-.]{1,64}$')
+
+# API key for Home Assistant and other service integrations (set via env var).
+_API_KEY: str = os.getenv("DOCUMENT_SEARCH_API_KEY", "").strip()
+
+# Background update job state.
+_update_job: dict = {"status": "idle"}
+
+
+def _check_api_key(key: str | None) -> bool:
+    """Constant-time comparison to prevent timing attacks on the API key."""
+    return bool(_API_KEY) and bool(key) and secrets.compare_digest(_API_KEY, key)
 
 
 def highlight_terms(text: str, query: str) -> str:
@@ -166,6 +178,17 @@ class ReorganizeApplyRequest(BaseModel):
 class PullModelRequest(BaseModel):
     model: str | None = None
 
+
+class HaKeyCreateRequest(BaseModel):
+    label: str = Field(min_length=1, max_length=64)
+    path_filter: str = Field(min_length=1)
+    description: str = ""
+
+
+class HaSearchRequest(BaseModel):
+    query: str = Field(min_length=1)
+    limit: int = Field(default=5, ge=1, le=20)
+
 class MarkRequest(BaseModel):
     document_id: int
     is_marked: bool = True
@@ -201,10 +224,34 @@ def _recommend_tier(available_ram_gb: float) -> dict:
             "description": f"{available_ram_gb:.0f} GB free RAM", "examples": ["llama3.1:70b", "qwen2.5:32b"]}
 
 
+_OPENAPI_TAGS = [
+    {"name": "auth",   "description": "Login and session"},
+    {"name": "search", "description": "Full-text document search"},
+    {"name": "index",  "description": "Crawl and indexing jobs"},
+    {"name": "ha",     "description": "Home Assistant integration — authenticate with `X-Api-Key` header"},
+    {"name": "ai",     "description": "Ollama AI operations"},
+    {"name": "users",  "description": "User management (admin only)"},
+    {"name": "config", "description": "Application configuration"},
+    {"name": "system", "description": "System diagnostics and maintenance"},
+    {"name": "update", "description": "Application update via git + Docker"},
+    {"name": "ssl",    "description": "TLS certificate management"},
+    {"name": "files",  "description": "File serving"},
+]
+
+
 def create_app(db_path: str = "./document_index.db") -> FastAPI:
     config_path = Path(os.getenv("DOCUMENT_SEARCH_CONFIG_PATH", "./config.json"))
     ssl_dir = Path(os.getenv("DOCUMENT_SEARCH_SSL_DIR", "/data/ssl"))
-    app = FastAPI(title="Document Search", version="1.4.0")
+    app = FastAPI(
+        title="Seekr",
+        description=(
+            "Self-hosted document search with full-text indexing and Home Assistant integration.\n\n"
+            "**Home Assistant endpoints** (`/api/ha/*`) authenticate with the `X-Api-Key` header — "
+            "no session token required. Create keys via Config → Home Assistant."
+        ),
+        version="1.5.0",
+        openapi_tags=_OPENAPI_TAGS,
+    )
     templates = Jinja2Templates(directory="document_search/web/templates")
     app.mount("/static", StaticFiles(directory="document_search/web/static"), name="static")
     sessions: dict[str, tuple[int, float, str]] = {}
@@ -226,6 +273,39 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             return load_config(config_path)
         return AppConfig()
 
+    # ── HA key helpers ─────────────────────────────────────────────────
+
+    def _load_ha_keys() -> list[dict]:
+        if not config_path.exists():
+            return []
+        try:
+            return json.loads(config_path.read_text(encoding="utf-8")).get("ha_api_keys", [])
+        except Exception:
+            return []
+
+    def _save_ha_keys(keys: list[dict]) -> None:
+        raw: dict = {}
+        if config_path.exists():
+            try:
+                raw = json.loads(config_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        raw["ha_api_keys"] = keys
+        config_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+
+    def _resolve_ha_key(key_value: str | None) -> dict | None:
+        """Return the matching key config, or None if invalid.
+        Global env-var key maps to unrestricted access (path_filter=None)."""
+        if not key_value:
+            return None
+        if _check_api_key(key_value):
+            return {"id": "__global__", "label": "Global key", "path_filter": None}
+        for k in _load_ha_keys():
+            stored = k.get("key", "")
+            if stored and secrets.compare_digest(stored, key_value):
+                return k
+        return None
+
     # ── Security headers ───────────────────────────────────────────────
     class _SecurityHeaders(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next) -> Response:
@@ -235,6 +315,19 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             response.headers["X-XSS-Protection"] = "1; mode=block"
             response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
             response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+            # Swagger UI (/docs, /redoc) loads assets from CDN — skip strict CSP there.
+            if request.url.path not in ("/docs", "/redoc", "/openapi.json"):
+                response.headers["Content-Security-Policy"] = (
+                    "default-src 'self'; "
+                    "script-src 'self' 'unsafe-inline'; "
+                    "style-src 'self' 'unsafe-inline'; "
+                    "img-src 'self' data:; "
+                    "connect-src 'self'; "
+                    "font-src 'self'; "
+                    "frame-ancestors 'none'; "
+                    "base-uri 'self'; "
+                    "form-action 'self'"
+                )
             if request.url.path.startswith("/static/"):
                 response.headers["Cache-Control"] = "public, max-age=3600, immutable"
             else:
@@ -305,7 +398,11 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     def ingest_page(request: Request):
         return templates.TemplateResponse("ingest.html", {"request": request})
 
-    
+    @app.get("/wiki", response_class=HTMLResponse)
+    def wiki_page(request: Request):
+        return templates.TemplateResponse("wiki.html", {"request": request})
+
+
     @app.get("/api/config")
     def api_get_config(x_auth_token: str | None = Header(default=None)):
         require_user(x_auth_token)
@@ -557,6 +654,55 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     
     
+    @app.get("/api/update/check")
+    def api_check_update(x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        if os.getenv("DOCUMENT_SEARCH_UI_UPDATE_ENABLED", "true").lower() != "true":
+            raise HTTPException(status_code=403, detail="UI update disabled")
+
+        current_commit: str | None = None
+        try:
+            proc = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True, text=True, check=False,
+                cwd="/app", timeout=10,
+            )
+            if proc.returncode == 0:
+                current_commit = proc.stdout.strip()
+        except Exception:
+            pass
+        if not current_commit:
+            current_commit = os.getenv("GIT_COMMIT")
+
+        latest_commit: str | None = None
+        check_error: str | None = None
+        import urllib.request as _ur
+        import urllib.error as _ue
+        try:
+            req = _ur.Request(
+                "https://api.github.com/repos/harpf/Seekr/commits/main",
+                headers={
+                    "Accept": "application/vnd.github.sha",
+                    "User-Agent": "Seekr-update-check/1.0",
+                },
+            )
+            with _ur.urlopen(req, timeout=10) as r:
+                latest_commit = r.read().decode().strip()
+        except Exception as exc:
+            check_error = str(exc)
+
+        update_available: bool | None = None
+        if current_commit and latest_commit:
+            update_available = current_commit != latest_commit
+
+        return {
+            "current_commit": current_commit,
+            "latest_commit": latest_commit,
+            "update_available": update_available,
+            "app_version": app.version,
+            "error": check_error,
+        }
+
     @app.post("/api/update/run")
     def api_run_update(x_auth_token: str | None = Header(default=None)):
         require_admin(x_auth_token)
@@ -565,8 +711,204 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         script = Path("/app/scripts/update.sh")
         if not script.exists():
             raise HTTPException(status_code=404, detail="Update script not found")
-        proc = subprocess.run(["/bin/sh", str(script)], capture_output=True, text=True, check=False)
-        return {"exit_code": proc.returncode, "stdout": proc.stdout[-4000:], "stderr": proc.stderr[-4000:]}
+
+        job_id = uuid.uuid4().hex
+        _update_job.clear()
+        _update_job.update({"job_id": job_id, "status": "running", "stdout": "", "stderr": "", "exit_code": None})
+
+        def _runner():
+            proc = subprocess.run(["/bin/sh", str(script)], capture_output=True, text=True, check=False)
+            _update_job.update({
+                "status": "done" if proc.returncode == 0 else "error",
+                "exit_code": proc.returncode,
+                "stdout": proc.stdout[-4000:],
+                "stderr": proc.stderr[-4000:],
+            })
+
+        threading.Thread(target=_runner, daemon=True).start()
+        return {"job_id": job_id, "status": "started"}
+
+    @app.get("/api/update/status")
+    def api_update_status(x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        return dict(_update_job)
+
+    # ── Home Assistant integration ─────────────────────────────────────
+
+    @app.get("/api/ha/status", tags=["ha"])
+    def api_ha_status(x_api_key: str | None = Header(default=None)):
+        key_cfg = _resolve_ha_key(x_api_key)
+        if not key_cfg:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid or missing API key. Configure one via Config → Home Assistant.",
+            )
+        db = store()
+        doc_count = db.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        block_count = db.conn.execute("SELECT COUNT(*) FROM content_blocks").fetchone()[0]
+        total_size = db.conn.execute("SELECT COALESCE(SUM(file_size), 0) FROM documents").fetchone()[0]
+        return {
+            "state": "online",
+            "documents": doc_count,
+            "content_blocks": block_count,
+            "total_file_size_bytes": total_size,
+            "app_version": app.version,
+        }
+
+    @app.get("/api/ha/test", tags=["ha"])
+    def api_ha_test(x_api_key: str | None = Header(default=None)):
+        """Connectivity probe — returns 200 even on auth failure so HA can show a clear error."""
+        key_cfg = _resolve_ha_key(x_api_key)
+        if not key_cfg:
+            return {
+                "connected": False,
+                "error": "Invalid or missing API key. Create one via Config → Home Assistant.",
+            }
+        try:
+            db = store()
+            doc_count = db.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+            return {
+                "connected": True,
+                "key_label": key_cfg.get("label", ""),
+                "path_filter": key_cfg.get("path_filter"),
+                "documents": doc_count,
+                "app_version": app.version,
+            }
+        except Exception as e:
+            return {"connected": False, "error": str(e)}
+
+    def _ha_search_impl(query: str, limit: int, x_api_key: str | None) -> dict:
+        key_cfg = _resolve_ha_key(x_api_key)
+        if not key_cfg:
+            raise HTTPException(status_code=401, detail="Invalid or missing API key")
+        path_filter: str | None = key_cfg.get("path_filter")
+        db = store()
+        rows = search(db, query, limit, None, path_filter, None, None, None, None, None)
+        results = [
+            {
+                "filename": r["filename"],
+                "path": r["path"],
+                "extension": r["extension"],
+                "modified_at": (r["modified_at"] or "")[:10],
+                "snippet": r["snippet"] or "",
+                "block_type": r["block_type"],
+            }
+            for r in rows
+        ]
+
+        # Try AI-generated answer; fall back to first snippet excerpt.
+        answer: str | None = None
+        if results:
+            context_parts = [
+                f"Source: {r['filename']} ({r['path']})\n{r['snippet']}"
+                for r in results[:3]
+                if r.get("snippet")
+            ]
+            if context_parts and organizer.is_available():
+                answer = organizer.ask(query, "\n\n".join(context_parts))
+            if not answer and results[0].get("snippet"):
+                answer = f"Found in {results[0]['filename']}: {results[0]['snippet'][:300]}"
+
+        sources = [
+            {"filename": r["filename"], "path": r["path"], "modified_at": r["modified_at"]}
+            for r in results
+        ]
+
+        return {
+            "query": query,
+            "key_label": key_cfg.get("label", ""),
+            "path_filter": path_filter,
+            "count": len(results),
+            "answer": answer,
+            "sources": sources,
+            "results": results,
+        }
+
+    @app.post("/api/ha/search", tags=["ha"])
+    def api_ha_search_post(req: HaSearchRequest, x_api_key: str | None = Header(default=None)):
+        return _ha_search_impl(req.query, req.limit, x_api_key)
+
+    @app.get("/api/ha/search", tags=["ha"])
+    def api_ha_search_get(
+        query: str,
+        limit: int = 5,
+        x_api_key: str | None = Header(default=None),
+    ):
+        limit = max(1, min(limit, 20))
+        return _ha_search_impl(query, limit, x_api_key)
+
+    @app.get("/api/ha/keys", tags=["ha"])
+    def api_ha_list_keys(x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        return _load_ha_keys()
+
+    @app.post("/api/ha/keys", tags=["ha"])
+    def api_ha_create_key(req: HaKeyCreateRequest, x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        path_filter = req.path_filter.strip()
+        if not path_filter:
+            raise HTTPException(status_code=400, detail="path_filter must not be empty")
+        new_key: dict = {
+            "id": uuid.uuid4().hex[:8],
+            "label": req.label,
+            "path_filter": path_filter,
+            "description": req.description,
+            "key": secrets.token_hex(32),
+            "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        }
+        keys = _load_ha_keys()
+        keys.append(new_key)
+        _save_ha_keys(keys)
+        return new_key
+
+    @app.delete("/api/ha/keys/{key_id}", tags=["ha"])
+    def api_ha_delete_key(key_id: str, x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        keys = [k for k in _load_ha_keys() if k.get("id") != key_id]
+        _save_ha_keys(keys)
+        return {"status": "deleted", "id": key_id}
+
+    @app.post("/api/ha/index", tags=["ha"])
+    def api_ha_index(x_api_key: str | None = Header(default=None)):
+        key_cfg = _resolve_ha_key(x_api_key)
+        if not key_cfg:
+            raise HTTPException(status_code=401, detail="Invalid or missing API key")
+        cfg = load_effective_config()
+        raw_cfg: dict = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+        paths = [sp["path"] for sp in raw_cfg.get("source_paths", []) if sp.get("path")]
+        if not paths:
+            raise HTTPException(status_code=400, detail="No source paths configured in config.json")
+        job_id = uuid.uuid4().hex
+        jobs[job_id] = JobState(status="running")
+
+        def runner():
+            db = store()
+            for path in iter_documents([Path(p) for p in paths], cfg):
+                j = jobs[job_id]
+                j.found += 1
+                fp = fingerprint(path)
+                existing = db.get_document(str(fp.path))
+                if existing and existing["sha256"] == fp.sha256 and existing["modified_at"] == fp.modified_at.isoformat():
+                    j.skipped += 1
+                    j.done += 1
+                    continue
+                extractor = extractor_for(path.suffix.lower())
+                if extractor is None:
+                    j.done += 1
+                    continue
+                result = extractor.extract(path)
+                db.upsert_document(fp, result)
+                if result.status == "error":
+                    j.errors += 1
+                elif existing:
+                    j.updated += 1
+                else:
+                    j.indexed += 1
+                j.done += 1
+            jobs[job_id].status = "finished"
+
+        threading.Thread(target=runner, daemon=True).start()
+        return {"job_id": job_id, "paths": paths}
 
     @app.get("/api/system/dependencies")
     def api_dependencies(x_auth_token: str | None = Header(default=None)):
@@ -1015,8 +1357,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 continue
 
             current = Path(doc["path"])
-            clean_sub = re.sub(r"\.\.", "", item.new_subpath.strip("/"))
-            target_dir = upload_root / clean_sub
+            # Strip leading slashes; containment check below enforces the boundary.
+            target_dir = upload_root / item.new_subpath.strip("/\\")
 
             try:
                 target_resolved = target_dir.resolve()

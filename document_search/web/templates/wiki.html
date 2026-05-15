@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wiki · Seekr</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <style>
+    .wiki-layout { display:grid; grid-template-columns:220px 1fr; gap:1.5rem; align-items:start; }
+    @media(max-width:700px){ .wiki-layout{ grid-template-columns:1fr; } .wiki-toc{ display:none; } }
+    .wiki-toc { position:sticky; top:1rem; background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:1rem; font-size:.83rem; }
+    .wiki-toc h3 { font-size:.78rem; text-transform:uppercase; letter-spacing:.05em; color:var(--txt-3); margin:0 0 .6rem; }
+    .wiki-toc a { display:block; color:var(--txt-2); text-decoration:none; padding:.2rem 0; border-left:2px solid transparent; padding-left:.5rem; }
+    .wiki-toc a:hover, .wiki-toc a.active { color:var(--accent); border-left-color:var(--accent); }
+    .wiki-toc .toc-sub { padding-left:1.2rem; }
+    .wiki-content h2 { font-size:1.15rem; margin:2rem 0 .6rem; padding-bottom:.35rem; border-bottom:1px solid var(--border); }
+    .wiki-content h3 { font-size:.95rem; margin:1.2rem 0 .4rem; color:var(--txt-1); }
+    .wiki-content p { font-size:.88rem; color:var(--txt-2); line-height:1.65; margin:.4rem 0; }
+    .wiki-content ul, .wiki-content ol { font-size:.88rem; color:var(--txt-2); line-height:1.7; padding-left:1.4rem; margin:.4rem 0; }
+    .wiki-content code { background:var(--bg-2); border:1px solid var(--border); border-radius:3px; padding:.1em .35em; font-size:.82rem; }
+    .wiki-content pre { background:var(--bg-2); border:1px solid var(--border); border-radius:6px; padding:.75rem 1rem; overflow-x:auto; font-size:.8rem; line-height:1.5; margin:.6rem 0; }
+    .wiki-content pre code { background:none; border:none; padding:0; }
+    .wiki-content table { width:100%; border-collapse:collapse; font-size:.83rem; margin:.6rem 0; }
+    .wiki-content th { background:var(--bg-2); color:var(--txt-2); font-weight:600; padding:.4rem .6rem; text-align:left; border-bottom:1px solid var(--border); }
+    .wiki-content td { padding:.4rem .6rem; border-bottom:1px solid var(--border); color:var(--txt-2); vertical-align:top; }
+    .wiki-content .callout { background:color-mix(in srgb,var(--accent) 8%,transparent); border-left:3px solid var(--accent); border-radius:0 6px 6px 0; padding:.6rem .9rem; margin:.6rem 0; font-size:.85rem; }
+    .wiki-content .callout.warn { background:color-mix(in srgb,var(--yellow,#f0a) 8%,transparent); border-left-color:var(--yellow,orange); }
+    .wiki-section { scroll-margin-top:1rem; }
+    .wiki-badge { display:inline-block; background:var(--accent); color:#fff; font-size:.7rem; font-weight:700; border-radius:3px; padding:.1em .4em; vertical-align:middle; margin-left:.3rem; }
+    .wiki-badge.get  { background:#2e9e6b; }
+    .wiki-badge.post { background:#2563eb; }
+    .wiki-badge.del  { background:#dc2626; }
+  </style>
+</head>
+<body class="wrap" data-page="wiki">
+
+  <nav class="topbar">
+    <div class="topbar-inner container">
+      <a class="brand" href="/">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Seekr
+      </a>
+      <div class="nav-links">
+        <a href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span class="nav-lbl">Dashboard</span></a>
+        <a href="/search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span class="nav-lbl">Search</span></a>
+        <a href="/ingest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span class="nav-lbl">Ingest</span></a>
+        <a href="/config"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg><span class="nav-lbl">Config</span></a>
+        <a href="/wiki"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg><span class="nav-lbl">Wiki</span></a>
+        <div id="navSep" class="nav-sep hidden"></div>
+        <button id="navSignout" class="nav-signout hidden" onclick="signOut()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          <span class="nav-lbl">Sign out</span>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main">
+    <div class="container">
+      <div class="pg-head">
+        <h1>Documentation</h1>
+        <p>Guides, reference and integration manual for Seekr.</p>
+      </div>
+
+      <div class="wiki-layout">
+
+        <!-- ── Table of contents ── -->
+        <nav class="wiki-toc">
+          <h3>Contents</h3>
+          <a href="#quick-start">Quick Start</a>
+          <a href="#search-syntax">Search Syntax</a>
+          <a href="#file-types">File Types</a>
+          <a href="#tags-marks">Tags &amp; Marks</a>
+          <a href="#upload-ai">Upload &amp; AI Organizer</a>
+          <a href="#ha">Home Assistant</a>
+          <a class="toc-sub" href="#ha-keys">API Keys</a>
+          <a class="toc-sub" href="#ha-yaml">YAML Snippet</a>
+          <a class="toc-sub" href="#ha-answer">Answer &amp; Sources</a>
+          <a href="#api-ref">API Reference</a>
+          <a class="toc-sub" href="#api-auth">Authentication</a>
+          <a class="toc-sub" href="#api-search">Search</a>
+          <a class="toc-sub" href="#api-ha">HA Endpoints</a>
+          <a href="#administration">Administration</a>
+          <a href="#troubleshooting">Troubleshooting</a>
+          <hr style="border:none;border-top:1px solid var(--border);margin:.6rem 0;" />
+          <a href="/docs" target="_blank" rel="noopener">Swagger UI ↗</a>
+          <a href="/redoc" target="_blank" rel="noopener">ReDoc ↗</a>
+        </nav>
+
+        <!-- ── Wiki content ── -->
+        <div class="wiki-content">
+
+          <!-- Quick Start -->
+          <section class="wiki-section" id="quick-start">
+            <h2>Quick Start</h2>
+            <p>Seekr is a self-hosted, full-text document search engine. It extracts text from PDF, Word, PowerPoint, Markdown, and plain-text files, stores the text in a SQLite FTS5 index, and provides a web UI plus a REST API.</p>
+            <ol>
+              <li>Deploy with <code>docker compose up -d</code> — the app listens on port <strong>8080</strong>.</li>
+              <li>Open <a href="/">the dashboard</a> and sign in (default: <code>admin</code> / <code>admin</code> — <strong>change immediately</strong>).</li>
+              <li>Go to <strong>Config → Paths</strong>, add your document root (e.g. <code>/documents</code>), and click <strong>Save</strong>.</li>
+              <li>Go to <strong>Ingest → Run Index</strong> to crawl and index all supported files.</li>
+              <li>Open <strong>Search</strong> and start querying.</li>
+            </ol>
+            <div class="callout">The index lives in <code>/data/document_index.db</code> inside the container. Mount a persistent volume at <code>/data</code> to survive restarts.</div>
+          </section>
+
+          <!-- Search Syntax -->
+          <section class="wiki-section" id="search-syntax">
+            <h2>Search Syntax</h2>
+            <p>The search engine uses SQLite FTS5 with a custom tokeniser. Basic syntax:</p>
+            <table>
+              <thead><tr><th>Syntax</th><th>Example</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td><code>word</code></td><td><code>invoice</code></td><td>Match any block containing "invoice"</td></tr>
+                <tr><td><code>word1 word2</code></td><td><code>invoice 2024</code></td><td>Implicit AND — both words must appear</td></tr>
+                <tr><td><code>"phrase"</code></td><td><code>"annual report"</code></td><td>Exact phrase match</td></tr>
+                <tr><td><code>word*</code></td><td><code>invest*</code></td><td>Prefix match (investment, investor…)</td></tr>
+                <tr><td><code>-word</code></td><td><code>invoice -draft</code></td><td>Exclude blocks containing "draft"</td></tr>
+                <tr><td><code>OR</code></td><td><code>pdf OR docx</code></td><td>Either word</td></tr>
+              </tbody>
+            </table>
+            <h3>Filters</h3>
+            <p>Use the filter panel in the Search UI to narrow results by file type, path prefix, date range, tag, or block type (page, heading, paragraph).</p>
+          </section>
+
+          <!-- File Types -->
+          <section class="wiki-section" id="file-types">
+            <h2>Supported File Types</h2>
+            <table>
+              <thead><tr><th>Extension</th><th>Extractor</th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td><code>.pdf</code></td><td>pdftotext (poppler)</td><td>Per-page blocks; OCR fallback via Tesseract</td></tr>
+                <tr><td><code>.docx</code></td><td>python-docx</td><td>Paragraph and heading blocks</td></tr>
+                <tr><td><code>.pptx</code></td><td>python-pptx</td><td>Per-slide blocks</td></tr>
+                <tr><td><code>.doc</code> / <code>.ppt</code></td><td>antiword / catppt</td><td>Legacy Office; requires CLI tools in container</td></tr>
+                <tr><td><code>.txt</code></td><td>built-in</td><td>Chunked into ~500-token blocks</td></tr>
+                <tr><td><code>.md</code></td><td>built-in</td><td>Split on headings</td></tr>
+              </tbody>
+            </table>
+            <p>Add additional extensions via <strong>Config → General → Supported extensions</strong>. Files exceeding <strong>max_file_size_mb</strong> are skipped.</p>
+          </section>
+
+          <!-- Tags & Marks -->
+          <section class="wiki-section" id="tags-marks">
+            <h2>Tags &amp; Marks</h2>
+            <p><strong>Tags</strong> are user-defined labels attached to a document (per user). They are searchable via the tag filter and the tag cloud on the Search page.</p>
+            <p><strong>Marks</strong> (bookmarks) flag a document for quick retrieval. Toggle the bookmark icon on any search result.</p>
+            <p>Tags set during upload via the API are stored as the uploading user's tags on that document.</p>
+          </section>
+
+          <!-- Upload & AI -->
+          <section class="wiki-section" id="upload-ai">
+            <h2>Upload &amp; AI Organizer</h2>
+            <p>Files can be uploaded through <strong>Ingest → Upload</strong>. The optional <strong>AI Organizer</strong> uses a local Ollama model to suggest a folder sub-path and tags based on the document's content.</p>
+            <h3>Configuring Ollama</h3>
+            <ol>
+              <li>Run Ollama and pull a model: <code>ollama pull llama3.2</code></li>
+              <li>Set the Ollama URL in <strong>Config → AI</strong> (default: <code>http://ollama:11434</code>).</li>
+              <li>Use <strong>Test Connection</strong> to verify the model responds.</li>
+            </ol>
+            <h3>AI Reorganize</h3>
+            <p>Ingest → AI Reorganize scans up to 50 uploaded documents and suggests an optimal folder hierarchy. Accepted suggestions are applied as file moves on disk and path updates in the index.</p>
+          </section>
+
+          <!-- Home Assistant -->
+          <section class="wiki-section" id="ha">
+            <h2>Home Assistant Integration</h2>
+            <p>Seekr exposes a dedicated REST API for Home Assistant automations, authenticated by long-lived API keys — no session token needed.</p>
+
+            <h3 id="ha-keys">API Keys</h3>
+            <p>Go to <strong>Config → Home Assistant → Create New Key</strong>. Each key is scoped to a <strong>path filter</strong> — searches via that key only return documents whose path starts with the filter value.</p>
+            <div class="callout warn">The full key is shown exactly once after creation. Copy it immediately and store it in your HA secrets file.</div>
+            <p>Use <strong>Config → Home Assistant → Connection Test</strong> to paste a key and confirm it authenticates successfully before adding it to HA.</p>
+
+            <h3 id="ha-yaml">HA configuration.yaml snippet</h3>
+            <p>The YAML generator in <strong>Config → Home Assistant</strong> produces a ready-to-paste snippet. It creates:</p>
+            <ul>
+              <li><code>input_text.seekr_query</code> — a text helper for typing search queries</li>
+              <li><code>rest_command.seekr_search</code> — calls <code>POST /api/ha/search</code></li>
+              <li>An automation that fires on query changes and shows results as a persistent notification</li>
+            </ul>
+            <p>Minimal example:</p>
+            <pre><code>rest_command:
+  seekr_search:
+    url: "https://seekr.yourdomain.local/api/ha/search"
+    method: POST
+    headers:
+      Content-Type: application/json
+      X-Api-Key: !secret seekr_api_key
+    payload: '{"query": "{{ query }}", "limit": 5}'</code></pre>
+
+            <h3 id="ha-answer">Answer &amp; Sources in the Response</h3>
+            <p>The <code>POST /api/ha/search</code> response includes:</p>
+            <ul>
+              <li><strong><code>answer</code></strong> — a 1–3 sentence plain-text answer generated by the configured Ollama model (or a fallback excerpt if Ollama is unavailable).</li>
+              <li><strong><code>sources</code></strong> — a list of <code>{ filename, path, modified_at }</code> objects for easy attribution.</li>
+              <li><strong><code>results</code></strong> — full result objects including <code>snippet</code>, <code>extension</code>, and <code>block_type</code>.</li>
+            </ul>
+            <p>Example automation message using the answer:</p>
+            <pre><code>message: >
+  {% if r.content.answer %}{{ r.content.answer }}{% endif %}
+
+  Sources:
+  {% for s in r.content.sources %}
+  • {{ s.filename }} ({{ s.modified_at }})
+  {% endfor %}</code></pre>
+          </section>
+
+          <!-- API Reference -->
+          <section class="wiki-section" id="api-ref">
+            <h2>API Reference</h2>
+            <p>The full interactive reference is available at <a href="/docs" target="_blank" rel="noopener"><strong>/docs</strong> (Swagger UI)</a> and <a href="/redoc" target="_blank" rel="noopener"><strong>/redoc</strong> (ReDoc)</a>. The sections below highlight the most commonly used endpoints.</p>
+
+            <h3 id="api-auth">Authentication</h3>
+            <p>All UI endpoints require an <code>X-Auth-Token</code> header obtained from <code>POST /api/login</code>. Tokens expire after 8 hours.</p>
+            <p>Home Assistant endpoints (<code>/api/ha/*</code>) use <code>X-Api-Key</code> instead — no login required.</p>
+
+            <h3 id="api-search">Search Endpoints</h3>
+            <table>
+              <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+              <tbody>
+                <tr><td><span class="wiki-badge post">POST</span></td><td><code>/api/search</code></td><td>Full-text search — returns ranked results with snippets</td></tr>
+                <tr><td><span class="wiki-badge post">POST</span></td><td><code>/api/index/start</code></td><td>Start a crawl + index job for given paths</td></tr>
+                <tr><td><span class="wiki-badge get">GET</span></td><td><code>/api/index/jobs/{id}</code></td><td>Poll indexing job status</td></tr>
+                <tr><td><span class="wiki-badge post">POST</span></td><td><code>/api/index/cleanup</code></td><td>Remove index entries for missing files</td></tr>
+              </tbody>
+            </table>
+
+            <h3 id="api-ha">Home Assistant Endpoints</h3>
+            <table>
+              <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+              <tbody>
+                <tr><td><span class="wiki-badge get">GET</span></td><td><code>/api/ha/test</code></td><td>X-Api-Key</td><td>Connectivity probe — always returns 200 with <code>connected</code> bool</td></tr>
+                <tr><td><span class="wiki-badge get">GET</span></td><td><code>/api/ha/status</code></td><td>X-Api-Key</td><td>Document counts and app version</td></tr>
+                <tr><td><span class="wiki-badge post">POST</span></td><td><code>/api/ha/search</code></td><td>X-Api-Key</td><td>Folder-scoped search with optional AI answer</td></tr>
+                <tr><td><span class="wiki-badge get">GET</span></td><td><code>/api/ha/search?query=…</code></td><td>X-Api-Key</td><td>GET variant for simple automations</td></tr>
+                <tr><td><span class="wiki-badge post">POST</span></td><td><code>/api/ha/index</code></td><td>X-Api-Key</td><td>Trigger re-index of configured source paths</td></tr>
+                <tr><td><span class="wiki-badge get">GET</span></td><td><code>/api/ha/keys</code></td><td>Session (admin)</td><td>List all HA keys</td></tr>
+                <tr><td><span class="wiki-badge post">POST</span></td><td><code>/api/ha/keys</code></td><td>Session (admin)</td><td>Create a new scoped key</td></tr>
+                <tr><td><span class="wiki-badge del">DELETE</span></td><td><code>/api/ha/keys/{id}</code></td><td>Session (admin)</td><td>Revoke a key</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <!-- Administration -->
+          <section class="wiki-section" id="administration">
+            <h2>Administration</h2>
+            <h3>Users</h3>
+            <p>Manage users under <strong>Config → Users</strong> (admin only). Two roles exist: <code>admin</code> (full access) and <code>user</code> (search + mark + tag).</p>
+            <h3>System Updates</h3>
+            <p>Go to <strong>Ingest → Check for Updates</strong>. If a newer commit is available on GitHub, click <strong>Run Update</strong>. The app runs <code>git pull &amp;&amp; docker compose build --no-cache &amp;&amp; docker compose up -d</code> in the background and reconnects automatically.</p>
+            <h3>Database</h3>
+            <p>The SQLite database runs in WAL mode for concurrent reads. Use <strong>Config → System → Database Test</strong> to check integrity. Use <strong>Index Cleanup</strong> to remove stale entries for deleted files.</p>
+            <h3>SSL / TLS</h3>
+            <p><strong>Config → SSL</strong> lets you generate a self-signed certificate or upload your own. The nginx reverse proxy in <code>docker-compose.yml</code> references <code>/data/ssl/cert.pem</code> and <code>/data/ssl/key.pem</code>.</p>
+            <h3>Editors in the container</h3>
+            <p>Both <code>vim</code> and <code>nano</code> are available inside the container for quick config edits:</p>
+            <pre><code>docker exec -it seekr-document-search-1 bash
+nano /data/config.json</code></pre>
+          </section>
+
+          <!-- Troubleshooting -->
+          <section class="wiki-section" id="troubleshooting">
+            <h2>Troubleshooting</h2>
+            <table>
+              <thead><tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>Search returns no results</td>
+                  <td>Index not built yet</td>
+                  <td>Go to Ingest → Run Index</td>
+                </tr>
+                <tr>
+                  <td>PDF pages missing text</td>
+                  <td>Scanned PDF (image-only)</td>
+                  <td>Enable OCR — ensure Tesseract is installed (it is in the default image)</td>
+                </tr>
+                <tr>
+                  <td>HA search returns 401</td>
+                  <td>Wrong or revoked API key</td>
+                  <td>Use Config → HA → Connection Test to verify; regenerate key if needed</td>
+                </tr>
+                <tr>
+                  <td>AI suggestions unavailable</td>
+                  <td>Ollama not running or model not pulled</td>
+                  <td>Config → AI → Test Connection; pull the model first</td>
+                </tr>
+                <tr>
+                  <td>Update fails / container won't restart</td>
+                  <td>Build error or Docker socket not mounted</td>
+                  <td>Check Ingest → Update Status for stderr output; run update manually via SSH</td>
+                </tr>
+                <tr>
+                  <td>Database locked errors</td>
+                  <td>Multiple processes writing simultaneously</td>
+                  <td>WAL mode + 5 s busy timeout should handle this; avoid running two indexers concurrently</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+        </div><!-- /wiki-content -->
+      </div><!-- /wiki-layout -->
+    </div>
+  </main>
+
+  <div class="toast-wrap" id="toastWrap"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -24,6 +24,7 @@ class SqliteStore:
         self.conn.execute("PRAGMA cache_size=-32000")    # 32 MB page cache
         self.conn.execute("PRAGMA temp_store=MEMORY")
         self.conn.execute("PRAGMA mmap_size=268435456")  # 256 MB memory-mapped I/O
+        self.conn.execute("PRAGMA busy_timeout=5000")    # wait up to 5s on a locked db
 
     def _init_schema(self) -> None:
         self.conn.executescript(

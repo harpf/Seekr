@@ -14,14 +14,15 @@ fi
 # Pull latest repository changes
 if [ -d .git ]; then
   git fetch --all --tags
-  git pull --ff-only
+  git pull
 fi
 
-# Rebuild and restart services
+# Full rebuild: stop, rebuild without cache, restart
 if command -v docker >/dev/null 2>&1; then
-  docker compose pull || true
-  docker compose up -d --build
+  docker compose down
+  docker compose build --no-cache
+  docker compose up -d
   docker image prune -f >/dev/null 2>&1 || true
 fi
 
-echo "Update completed." 
+echo "Update completed."

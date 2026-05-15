@@ -3,7 +3,13 @@
     "allow": [
       "Bash(python -m py_compile document_search/app.py document_search/services/ai_organizer.py)",
       "Bash(python -m pytest -q)",
-      "Bash(node *)"
+      "Bash(node *)",
+      "Bash(python -c \"from document_search.app import app; print\\('OK, version:', app.version\\)\")",
+      "Bash(python -m py_compile document_search/app.py)",
+      "Bash(python -m py_compile document_search/index/sqlite_store.py)",
+      "Bash(python -m py_compile document_search/web/static/app.js)",
+      "Bash(python -m py_compile document_search/app.py document_search/index/sqlite_store.py)",
+      "Bash(python -m py_compile document_search/services/ai_organizer.py)"
     ]
   }
 }

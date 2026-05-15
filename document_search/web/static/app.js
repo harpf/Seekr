@@ -466,15 +466,72 @@ async function startIndex() {
   }
 }
 
-async function runUpdate() {
-  const btn = document.getElementById('runUpdateBtn');
+async function checkForUpdates() {
+  const btn = document.getElementById('checkUpdateBtn');
+  const statusEl = document.getElementById('updateStatus');
   if (btn) btn.classList.add('loading');
+  if (statusEl) { statusEl.textContent = 'Checking GitHub…'; statusEl.className = 'feedback info'; statusEl.classList.remove('hidden'); }
+  try {
+    const data = await api('/api/update/check');
+    if (!statusEl) return;
+    const cur = escHtml((data.current_commit || '?').slice(0, 7));
+    const lat = escHtml((data.latest_commit  || '?').slice(0, 7));
+    if (data.error && !data.latest_commit) {
+      statusEl.textContent = `Could not reach GitHub: ${data.error}`;
+      statusEl.className = 'feedback err';
+    } else if (data.update_available === true) {
+      statusEl.textContent = `Update available — current ${cur} → latest ${lat}`;
+      statusEl.className = 'feedback ok';
+    } else if (data.update_available === false) {
+      statusEl.textContent = `Up to date (${cur})`;
+      statusEl.className = 'feedback ok';
+    } else {
+      statusEl.textContent = `Current commit: ${cur} — GitHub unreachable`;
+      statusEl.className = 'feedback info';
+    }
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = e.message; statusEl.className = 'feedback err'; }
+  } finally {
+    if (btn) btn.classList.remove('loading');
+  }
+}
+
+let _updatePollInterval = null;
+
+async function runUpdate() {
+  if (!confirm('Run system update? The app will rebuild and briefly go offline.')) return;
+  const btn = document.getElementById('runUpdateBtn');
+  const statusEl = document.getElementById('updateStatus');
+  if (btn) btn.classList.add('loading');
+  if (statusEl) { statusEl.textContent = 'Starting update…'; statusEl.className = 'feedback info'; statusEl.classList.remove('hidden'); }
+  if (_updatePollInterval) { clearInterval(_updatePollInterval); _updatePollInterval = null; }
+
   try {
     await api('/api/update/run', 'POST', {});
-    showToast('System update started', 'ok');
+    if (statusEl) statusEl.textContent = 'Update running — the app may restart…';
+
+    _updatePollInterval = setInterval(async () => {
+      try {
+        const s = await api('/api/update/status');
+        if (s.status === 'done') {
+          clearInterval(_updatePollInterval); _updatePollInterval = null;
+          if (btn) btn.classList.remove('loading');
+          if (statusEl) { statusEl.textContent = 'Update complete — reloading…'; statusEl.className = 'feedback ok'; }
+          showToast('Update complete', 'ok');
+          setTimeout(() => location.reload(), 2500);
+        } else if (s.status === 'error') {
+          clearInterval(_updatePollInterval); _updatePollInterval = null;
+          if (btn) btn.classList.remove('loading');
+          const detail = escHtml((s.stderr || s.stdout || 'unknown error').slice(0, 200));
+          if (statusEl) { statusEl.textContent = `Update failed: ${detail}`; statusEl.className = 'feedback err'; }
+          showToast('Update failed', 'err');
+        }
+      } catch (_) {
+        if (statusEl) statusEl.textContent = 'App restarting, reconnecting…';
+      }
+    }, 2500);
   } catch (e) {
-    showToast(e.message, 'err');
-  } finally {
+    if (statusEl) { statusEl.textContent = e.message; statusEl.className = 'feedback err'; }
     if (btn) btn.classList.remove('loading');
   }
 }
@@ -526,6 +583,7 @@ function switchTab(name) {
   if (name === 'users') loadUsers();
   if (name === 'ssl') loadSslStatus();
   if (name === 'ai') loadAiTabData();
+  if (name === 'ha') loadHaKeys();
   if (name === 'system') { loadDeps(); loadAiStatus(); }
 }
 
@@ -1182,9 +1240,183 @@ async function uploadCert() {
   }
 }
 
+// ── Home Assistant connection test ────────────────────────────────
+async function testHaConnection() {
+  const key = document.getElementById('haTestKey')?.value?.trim();
+  if (!key) { showToast('Paste a key to test', 'err'); return; }
+  setText('haTestResult', 'Testing…', 'info');
+  try {
+    const res = await fetch('/api/ha/test', { headers: { 'X-Api-Key': key } });
+    const data = await res.json();
+    if (data.connected) {
+      setText('haTestResult',
+        `Connected — key: "${data.key_label}", scope: ${data.path_filter || 'all folders'}, ${data.documents} documents, Seekr ${data.app_version}`,
+        'ok');
+    } else {
+      setText('haTestResult', `Not connected: ${data.error || 'unknown error'}`, 'err');
+    }
+  } catch (e) {
+    setText('haTestResult', `Request failed: ${e.message}`, 'err');
+  }
+}
+
+// ── Home Assistant key management ─────────────────────────────────
+let _haNewKey = null;
+const _haKeyStore = {};   // id → key record, for safe onclick lookups
+
+async function loadHaKeys() {
+  try {
+    const keys = await api('/api/ha/keys');
+    renderHaKeysTable(keys);
+  } catch (e) {
+    setText('haKeysResult', e.message, 'err');
+  }
+}
+
+function renderHaKeysTable(keys) {
+  const el = document.getElementById('haKeyTable');
+  if (!el) return;
+  // Store records for safe onclick lookups (avoids JS injection from label/key values)
+  Object.keys(_haKeyStore).forEach(k => delete _haKeyStore[k]);
+  keys.forEach(k => { _haKeyStore[k.id] = k; });
+  if (!keys.length) {
+    el.innerHTML = '<p class="muted" style="font-size:.82rem;">No keys yet. Create one below.</p>';
+    return;
+  }
+  el.innerHTML = `<table class="u-table"><thead><tr>
+    <th>Label</th><th>Path filter</th><th>Key (preview)</th><th>Description</th><th>Created</th><th></th>
+  </tr></thead><tbody>${
+    keys.map(k => `<tr>
+      <td><strong>${escHtml(k.label)}</strong></td>
+      <td><code style="font-size:.78rem;">${escHtml(k.path_filter || '—')}</code></td>
+      <td><code style="font-size:.75rem;color:var(--txt-3);">${escHtml((k.key || '').slice(0, 8))}…</code>
+          <button class="btn btn-g btn-sm" style="margin-left:.35rem;" onclick="prefillHaYamlById('${escHtml(k.id)}')">Use</button>
+      </td>
+      <td style="font-size:.78rem;color:var(--txt-3);">${escHtml(k.description || '—')}</td>
+      <td class="muted" style="font-size:.75rem;">${escHtml((k.created_at || '').slice(0, 10))}</td>
+      <td><button class="btn btn-g btn-sm" style="color:var(--red)" onclick="deleteHaKey('${escHtml(k.id)}')">Delete</button></td>
+    </tr>`).join('')
+  }</tbody></table>`;
+}
+
+function prefillHaYamlById(id) {
+  const k = _haKeyStore[id];
+  if (k) prefillHaYaml(k.key, k.label);
+}
+
+async function createHaKey() {
+  const label = document.getElementById('haKeyLabel')?.value?.trim();
+  const path_filter = document.getElementById('haKeyPath')?.value?.trim();
+  const description = document.getElementById('haKeyDesc')?.value?.trim() || '';
+  if (!label) { showToast('Enter a label', 'err'); return; }
+  if (!path_filter) { showToast('Enter a path filter', 'err'); return; }
+  try {
+    const k = await api('/api/ha/keys', 'POST', { label, path_filter, description });
+    showToast(`Key "${label}" created`, 'ok');
+    _haNewKey = k.key;
+    const card = document.getElementById('haNewKeyCard');
+    const valEl = document.getElementById('haNewKeyValue');
+    if (card) card.classList.remove('hidden');
+    if (valEl) valEl.textContent = k.key;
+    prefillHaYaml(k.key, k.label);
+    setText('haCreateResult', '', '');
+    if (document.getElementById('haKeyLabel')) document.getElementById('haKeyLabel').value = '';
+    if (document.getElementById('haKeyPath')) document.getElementById('haKeyPath').value = '';
+    if (document.getElementById('haKeyDesc')) document.getElementById('haKeyDesc').value = '';
+    await loadHaKeys();
+  } catch (e) {
+    showToast(e.message, 'err');
+    setText('haCreateResult', e.message, 'err');
+  }
+}
+
+async function deleteHaKey(id) {
+  if (!confirm('Delete this API key? Any Home Assistant automations using it will stop working.')) return;
+  try {
+    await api(`/api/ha/keys/${id}`, 'DELETE');
+    showToast('Key deleted', 'ok');
+    await loadHaKeys();
+  } catch (e) {
+    showToast(e.message, 'err');
+  }
+}
+
+function copyHaKey() {
+  if (!_haNewKey) return;
+  navigator.clipboard?.writeText(_haNewKey).then(() => showToast('Key copied to clipboard', 'ok'));
+}
+
+function prefillHaYaml(key, label) {
+  const keyEl = document.getElementById('haYamlKey');
+  if (keyEl) keyEl.value = key;
+  renderHaYaml();
+}
+
+function renderHaYaml() {
+  const host = (document.getElementById('haYamlHost')?.value?.trim() || 'https://seekr.yourdomain.local').replace(/\/$/, '');
+  const key = document.getElementById('haYamlKey')?.value?.trim() || 'YOUR_API_KEY_HERE';
+  const out = document.getElementById('haYamlOut');
+  if (!out) return;
+  out.textContent = `# ── Home Assistant configuration.yaml snippet ──────────────────────────
+# Seekr document search integration
+# Paste into configuration.yaml (or split across packages)
+
+input_text:
+  seekr_query:
+    name: "Seekr Search"
+    initial: ""
+    max: 255
+
+rest_command:
+  seekr_search:
+    url: "${host}/api/ha/search"
+    method: POST
+    headers:
+      Content-Type: application/json
+      X-Api-Key: "${key}"
+    payload: >-
+      {"query": "{{ query }}", "limit": 5}
+
+# Lovelace card (Entities card):
+#   - entity: input_text.seekr_query
+#     name: Document search
+
+# Automation that shows results as a notification:
+automation:
+  - alias: "Seekr: show search results"
+    trigger:
+      platform: state
+      entity_id: input_text.seekr_query
+    condition:
+      condition: template
+      value_template: "{{ trigger.to_state.state | length > 2 }}"
+    action:
+      - service: rest_command.seekr_search
+        data:
+          query: "{{ states('input_text.seekr_query') }}"
+        response_variable: r
+      - service: persistent_notification.create
+        data:
+          title: "Seekr: {{ states('input_text.seekr_query') }}"
+          message: >
+            {% if r.content.answer %}{{ r.content.answer }}{% endif %}
+
+            Found {{ r.content.count }} result(s) in {{ r.content.path_filter or "all folders" }}
+
+            {% for s in r.content.sources %}
+            • {{ s.filename }} ({{ s.modified_at }})
+            {% endfor %}`;
+}
+
+function copyHaYaml() {
+  const out = document.getElementById('haYamlOut');
+  if (!out?.textContent) { showToast('Generate YAML first', 'err'); return; }
+  navigator.clipboard?.writeText(out.textContent).then(() => showToast('YAML copied to clipboard', 'ok'));
+}
+
 // ── Nav & bootstrap ────────────────────────────────────────────────
 function initNav() {
-  const map = { home: '/', search: '/search', ingest: '/ingest', config: '/config' };
+  const map = { home: '/', search: '/search', ingest: '/ingest', config: '/config', wiki: '/wiki' };
   const activeHref = map[document.body?.dataset?.page || ''];
   document.querySelectorAll('.nav-links a').forEach(link => {
     if (link.getAttribute('href') === activeHref) link.classList.add('active');

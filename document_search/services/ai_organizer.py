@@ -11,6 +11,17 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+_ASK_PROMPT = """\
+You are a document search assistant. Based only on the document snippets provided, \
+answer the user's question in 1–3 plain-text sentences. If the snippets do not \
+contain enough information to answer, say so briefly.
+
+Question: {query}
+
+Snippets:
+{context}
+"""
+
 _STRUCTURE_PROMPT = """\
 You are a document management expert. Analyse the document list below from an organization's \
 file repository and suggest an optimal folder hierarchy for organizing them.
@@ -281,6 +292,30 @@ class AiOrganizer:
         except Exception as e:
             logger.error("suggest_structure error: %s", e)
             return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+    def ask(self, query: str, context: str) -> str | None:
+        """Generate a short plain-text answer to a question given document context."""
+        prompt = _ASK_PROMPT.format(query=query[:500], context=context[:3000])
+        payload = json.dumps({
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": 0.2, "num_predict": 200},
+        }).encode()
+        try:
+            req = urllib.request.Request(
+                f"{self.base_url}/api/generate",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                raw = json.loads(resp.read())
+                return raw.get("response", "").strip()[:500] or None
+        except Exception as e:
+            logger.debug("ask() failed: %s", e)
+            return None
 
 
 def _safe_subpath(value: object) -> str | None:
