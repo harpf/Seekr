@@ -77,3 +77,20 @@ def test_search_accepts_tags_list(client):
     )
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
+
+
+def test_search_response_is_grouped(client):
+    resp = client.post("/api/search", json={"query": ""}, headers=auth_headers(client))
+    assert resp.status_code == 200
+    data = resp.json()
+    if data:
+        doc = data[0]
+        assert "hits" in doc
+        assert "hit_count" in doc
+        assert "document_id" in doc
+        assert isinstance(doc["hits"], list)
+        if doc["hits"]:
+            hit = doc["hits"][0]
+            assert "block_type" in hit
+            assert "block_number" in hit
+            assert "snippet_html" in hit

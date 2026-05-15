@@ -1495,13 +1495,41 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             rows = search(db, req.query, req.limit, req.filetype, req.path, req.block_type, req.modified_from, req.modified_to, req.tags, user_id)
         except sqlite3.OperationalError as e:
             raise HTTPException(status_code=400, detail=f"Search query error: {e}")
-        payload = [dict(r) for r in rows]
-        marks = db.get_doc_marks_and_tags(user_id, [r["document_id"] for r in payload])
-        for item in payload:
-            item["open_url"] = f"/api/files/open?document_id={item['document_id']}"
-            item["snippet_html"] = highlight_terms(item.get("snippet") or "", req.query)
-            item.update(marks.get(item["document_id"], {"is_marked": False, "tags": []}))
-        return payload
+        # Group flat rows by document_id, preserving rank order
+        grouped: dict[int, dict] = {}
+        order: list[int] = []
+        for row in rows:
+            r = dict(row)
+            doc_id = r["document_id"]
+            if doc_id not in grouped:
+                order.append(doc_id)
+                grouped[doc_id] = {
+                    "document_id": doc_id,
+                    "filename": r["filename"],
+                    "path": r["path"],
+                    "extension": r["extension"],
+                    "modified_at": r["modified_at"],
+                    "hits": [],
+                }
+            grouped[doc_id]["hits"].append({
+                "block_type": r["block_type"],
+                "block_number": r["block_number"],
+                "snippet_html": highlight_terms(r.get("snippet") or "", req.query) or None,
+            })
+
+        marks = db.get_doc_marks_and_tags(user_id, order)
+        output = []
+        for doc_id in order:
+            doc = grouped[doc_id]
+            m = marks.get(doc_id, {"is_marked": False, "tags": []})
+            output.append({
+                **doc,
+                "is_marked": m["is_marked"],
+                "tags": m["tags"],
+                "open_url": f"/api/files/open?document_id={doc_id}",
+                "hit_count": len(doc["hits"]),
+            })
+        return output
 
     @app.get("/api/status")
     def api_status(x_auth_token: str | None = Header(default=None)):
