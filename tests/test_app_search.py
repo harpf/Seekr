@@ -67,3 +67,13 @@ def test_source_folders_endpoint(client):
     resp = client.get("/api/source-folders", headers=auth_headers(client))
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
+
+
+def test_search_accepts_tags_list(client):
+    resp = client.post(
+        "/api/search",
+        json={"query": "", "tags": ["tag1", "tag2"]},
+        headers=auth_headers(client),
+    )
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
