@@ -108,11 +108,50 @@ class SqliteStore:
             CREATE INDEX IF NOT EXISTS idx_doc_tags_tag_id   ON document_tags(tag_id);
             CREATE INDEX IF NOT EXISTS idx_user_tags_user_id ON user_tags(user_id);
             CREATE INDEX IF NOT EXISTS idx_marks_doc_id      ON user_document_marks(document_id);
+            CREATE TABLE IF NOT EXISTS principals (
+              id INTEGER PRIMARY KEY,
+              type TEXT NOT NULL CHECK(type IN ('user','group')),
+              external_id TEXT NOT NULL,
+              display_name TEXT,
+              created_at TEXT NOT NULL,
+              UNIQUE(type, external_id)
+            );
+            CREATE TABLE IF NOT EXISTS user_groups (
+              user_id INTEGER NOT NULL,
+              principal_id INTEGER NOT NULL,
+              PRIMARY KEY (user_id, principal_id),
+              FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+              FOREIGN KEY (principal_id) REFERENCES principals(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS document_acl (
+              document_id INTEGER NOT NULL,
+              principal_id INTEGER NOT NULL,
+              permission TEXT NOT NULL CHECK(permission IN ('read','write')),
+              granted_at TEXT NOT NULL,
+              PRIMARY KEY (document_id, principal_id, permission),
+              FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+              FOREIGN KEY (principal_id) REFERENCES principals(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_acl_doc        ON document_acl(document_id);
+            CREATE INDEX IF NOT EXISTS idx_acl_principal  ON document_acl(principal_id);
+            CREATE INDEX IF NOT EXISTS idx_user_groups_pid ON user_groups(principal_id);
             """
         )
         # Migration: add role column for existing databases
         try:
             self.conn.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+            self.conn.commit()
+        except Exception:
+            pass
+        # Migration: add owner_principal_id column for existing databases
+        try:
+            self.conn.execute("ALTER TABLE documents ADD COLUMN owner_principal_id INTEGER")
+            self.conn.commit()
+        except Exception:
+            pass
+        # Migration: add principal_id column on users (links user -> their 'user' principal)
+        try:
+            self.conn.execute("ALTER TABLE users ADD COLUMN principal_id INTEGER")
             self.conn.commit()
         except Exception:
             pass
