@@ -163,6 +163,60 @@ class SqliteStore:
                 self.conn.commit()
         except Exception:
             pass
+        self._backfill_acl()
+
+    def _backfill_acl(self) -> None:
+        """Idempotent backfill so existing data stays visible after ACL migration.
+
+        Creates the 'public' group, ensures every existing user has a 'user'-type
+        principal and is a member of 'public', and grants read on every existing
+        document to 'public'. Safe to run on every startup.
+        """
+        from datetime import UTC, datetime
+        now = datetime.now(tz=UTC).isoformat()
+
+        self.conn.execute(
+            "INSERT OR IGNORE INTO principals(type, external_id, display_name, created_at) "
+            "VALUES('group', 'public', 'Everyone', ?)",
+            (now,),
+        )
+        public_row = self.conn.execute(
+            "SELECT id FROM principals WHERE type='group' AND external_id='public'"
+        ).fetchone()
+        public_id = public_row["id"]
+
+        users_without_principal = self.conn.execute(
+            "SELECT id, username FROM users WHERE principal_id IS NULL"
+        ).fetchall()
+        for u in users_without_principal:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO principals(type, external_id, display_name, created_at) "
+                "VALUES('user', ?, ?, ?)",
+                (u["username"], u["username"], now),
+            )
+            p = self.conn.execute(
+                "SELECT id FROM principals WHERE type='user' AND external_id=?",
+                (u["username"],),
+            ).fetchone()
+            self.conn.execute(
+                "UPDATE users SET principal_id=? WHERE id=?", (p["id"], u["id"])
+            )
+            self.conn.execute(
+                "INSERT OR IGNORE INTO user_groups(user_id, principal_id) VALUES(?, ?)",
+                (u["id"], public_id),
+            )
+
+        # Grant 'public' read on every existing document that has no ACL yet
+        self.conn.execute(
+            """
+            INSERT OR IGNORE INTO document_acl(document_id, principal_id, permission, granted_at)
+            SELECT d.id, ?, 'read', ?
+            FROM documents d
+            WHERE NOT EXISTS (SELECT 1 FROM document_acl a WHERE a.document_id = d.id)
+            """,
+            (public_id, now),
+        )
+        self.conn.commit()
 
     def get_document(self, path: str):
         return self.conn.execute("SELECT * FROM documents WHERE path = ?", (path,)).fetchone()
@@ -246,8 +300,28 @@ class SqliteStore:
             "INSERT INTO users(username, password_hash, salt, created_at, role) VALUES(?,?,?,?,?)",
             (username, hash_password(password, salt), salt, now, role),
         )
+        user_id = cursor.lastrowid
+        self.conn.execute(
+            "INSERT OR IGNORE INTO principals(type, external_id, display_name, created_at) "
+            "VALUES('user', ?, ?, ?)",
+            (username, username, now),
+        )
+        p_row = self.conn.execute(
+            "SELECT id FROM principals WHERE type='user' AND external_id=?", (username,)
+        ).fetchone()
+        self.conn.execute(
+            "UPDATE users SET principal_id=? WHERE id=?", (p_row["id"], user_id)
+        )
+        public_row = self.conn.execute(
+            "SELECT id FROM principals WHERE type='group' AND external_id='public'"
+        ).fetchone()
+        if public_row:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO user_groups(user_id, principal_id) VALUES(?, ?)",
+                (user_id, public_row["id"]),
+            )
         self.conn.commit()
-        return cursor.lastrowid
+        return user_id
 
     def update_user_role(self, user_id: int, role: str) -> None:
         self.conn.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
