@@ -132,3 +132,75 @@ def test_ai_reorganize_persists_and_shape(tmp_path):
         assert body["total"] == 2
         assert body["done"] == 2
         assert len(body["results"]) == 2
+
+
+def test_restart_marks_running_jobs_interrupted(tmp_path):
+    """Simulate a crash: enqueue + claim, then close the app, then re-open.
+    The previously-running job must be marked 'interrupted'."""
+    from document_search.app import create_app
+    from document_search.services.job_store import JobStore
+    from document_search.index.sqlite_store import SqliteStore
+
+    db = tmp_path / "t.db"
+
+    # First app instance: enqueue + claim (force into running)
+    app1 = create_app(str(db))
+    with TestClient(app1) as c1:
+        token = _login(c1)
+        # Use a known-blocked path to skip actual indexing, but the validator
+        # rejects blocked paths *before* enqueuing, so use a real empty dir.
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        r = c1.post("/api/index/start", headers={"X-Auth-Token": token},
+                    json={"paths": [str(empty)]})
+        job_id = r.json()["job_id"]
+        # Force the job back to running so we can simulate the crash
+        s = SqliteStore(db)
+        s.conn.execute("UPDATE jobs SET state='running' WHERE id=?", (int(job_id),))
+        s.conn.commit()
+
+    # Second app instance: must mark it interrupted
+    app2 = create_app(str(db))
+    with TestClient(app2) as c2:
+        token = _login(c2)
+        r = c2.get(f"/api/index/jobs/{job_id}", headers={"X-Auth-Token": token})
+        assert r.status_code == 200
+        assert r.json()["status"] == "interrupted"
+
+
+def test_retry_recovers_from_transient_failure(tmp_path):
+    """A handler that fails the first time then succeeds: end state is succeeded,
+    retry_count == 1."""
+    from document_search.app import create_app
+    from document_search.services.job_store import JobStore
+
+    db = tmp_path / "t.db"
+    app = create_app(str(db))
+    attempts = []
+
+    @app.state.worker.handler("flaky_demo")
+    def _flaky(payload, progress_cb):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise RuntimeError("transient")
+        return {"ok": True}
+
+    with TestClient(app):
+        job_id = app.state.job_store.enqueue("flaky_demo", {}, max_retries=2)
+        # The worker is running; wait for retry cycle.
+        # Backoff is 2**1 = 2s; force next_attempt to now so we don't wait.
+        import time
+        deadline = time.monotonic() + 6
+        while time.monotonic() < deadline:
+            job = app.state.job_store.get(job_id)
+            if job["state"] == "pending" and job["retry_count"] >= 1:
+                # Speed up retry
+                app.state.job_store.conn.execute(
+                    "UPDATE jobs SET next_attempt_at=NULL WHERE id=?", (job_id,)
+                )
+                app.state.job_store.conn.commit()
+            if job["state"] in ("succeeded", "failed"):
+                break
+            time.sleep(0.05)
+        assert job["state"] == "succeeded"
+        assert job["retry_count"] == 1
