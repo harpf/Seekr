@@ -68,6 +68,11 @@ def _browse_all(
             )"""
         )
         params.extend([user_id] + tags + [len(tags)])
+    if not bypass_acl:
+        from document_search.services.acl_service import visible_document_ids_subquery
+        acl_sql, acl_params = visible_document_ids_subquery(user_id)
+        where.append(f"d.id IN ({acl_sql})")
+        params.extend(acl_params)
 
     # Returns one row per content_block, not per document.
     # LIMIT therefore limits blocks — callers that group by document_id

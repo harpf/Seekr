@@ -88,3 +88,20 @@ def test_search_bypass_acl_returns_all(populated_store):
     paths = {r["path"] for r in rows}
     assert "/d/shared.txt" in paths
     assert "/d/alice-secret.txt" in paths
+
+
+def test_browse_all_respects_acl_for_bob(populated_store):
+    """Empty query goes through _browse_all — must also be ACL-filtered."""
+    store, alice_id, bob_id = populated_store
+    rows = search(store, "", limit=100, user_id=bob_id)
+    paths = {r["path"] for r in rows}
+    assert "/d/shared.txt" in paths
+    assert "/d/alice-secret.txt" not in paths
+
+
+def test_browse_all_bypass_acl(populated_store):
+    store, _, _ = populated_store
+    rows = search(store, "", limit=100, user_id=None, bypass_acl=True)
+    paths = {r["path"] for r in rows}
+    assert "/d/shared.txt" in paths
+    assert "/d/alice-secret.txt" in paths
