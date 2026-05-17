@@ -113,3 +113,18 @@ def test_cli_uses_bypass_acl():
     from document_search import main as main_mod
     src = inspect.getsource(main_mod.cmd_search)
     assert "bypass_acl=True" in src, "CLI search must explicitly bypass ACL"
+
+
+def test_ha_search_uses_bypass_acl():
+    """The HA search path bypasses ACL — it's gated by API key + per-key path_filter,
+    not by a user identity. This must be explicit so a future audit can grep for it."""
+    from pathlib import Path
+    src = Path("document_search/app.py").read_text(encoding="utf-8")
+    # Find the _ha_search_impl block and assert bypass_acl=True is in it.
+    start = src.index("def _ha_search_impl")
+    # Look at the next ~30 lines after the def.
+    end = src.index("\n    def ", start + 1) if "\n    def " in src[start + 1:] else start + 2000
+    snippet = src[start:end]
+    assert "bypass_acl=True" in snippet, (
+        "_ha_search_impl must explicitly pass bypass_acl=True; see ACL Foundation plan."
+    )

@@ -856,7 +856,11 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             raise HTTPException(status_code=401, detail="Invalid or missing API key")
         path_filter: str | None = key_cfg.get("path_filter")
         db = store()
-        rows = search(db, query, limit, None, path_filter, None, None, None, None, None)
+        # HA is a privileged integration channel: API-key auth + per-key path_filter
+        # already scope results. There is no Seekr user identity to map onto, so we
+        # explicitly bypass the ACL filter. If HA keys ever become per-user, switch
+        # this to pass the mapped user_id instead. See ACL Foundation plan, Task 10.
+        rows = search(db, query, limit, None, path_filter, None, None, None, None, None, bypass_acl=True)
         results = [
             {
                 "filename": r["filename"],
