@@ -284,6 +284,49 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     def _stop_worker() -> None:
         worker.stop(timeout=5.0)
 
+    @worker.handler("index_paths")
+    def _handle_index_paths(payload: dict, progress_cb):
+        from document_search.crawler import iter_documents
+        from document_search.config import load_config
+
+        paths = payload["paths"]
+        config_path_override = payload.get("config_path")
+        if config_path_override:
+            cfg = load_config(Path(config_path_override))
+        elif config_path.exists():
+            cfg = load_config(config_path)
+        else:
+            cfg = AppConfig()
+
+        counts = {"found": 0, "indexed": 0, "skipped": 0, "updated": 0, "errors": 0, "done": 0}
+        # Use a worker-thread-owned SqliteStore (do NOT call `store()` which is request-thread-local)
+        db = SqliteStore(Path(db_path))
+        for path in iter_documents([Path(p) for p in paths], cfg):
+            counts["found"] += 1
+            fp = fingerprint(path)
+            existing = db.get_document(str(fp.path))
+            if existing and existing["sha256"] == fp.sha256 and existing["modified_at"] == fp.modified_at.isoformat():
+                counts["skipped"] += 1
+                counts["done"] += 1
+                progress_cb(dict(counts))
+                continue
+            extr = extractor_for(path.suffix.lower())
+            if extr is None:
+                counts["done"] += 1
+                progress_cb(dict(counts))
+                continue
+            result = extr.extract(path)
+            db.upsert_document(fp, result)
+            if result.status == "error":
+                counts["errors"] += 1
+            elif existing:
+                counts["updated"] += 1
+            else:
+                counts["indexed"] += 1
+            counts["done"] += 1
+            progress_cb(dict(counts))
+        return counts
+
     def store() -> SqliteStore:
         """Return a per-thread SqliteStore, creating it once on first use."""
         if not getattr(_thread_local, "initialized", False):
@@ -681,7 +724,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     @app.post("/api/index/start")
     def api_index_start(req: IndexRequest, x_auth_token: str | None = Header(default=None)):
-        require_admin(x_auth_token)
+        admin_id = require_admin(x_auth_token)
         for p in req.paths:
             if not p.strip():
                 raise HTTPException(status_code=400, detail="Path must not be empty.")
@@ -692,46 +735,45 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                     status_code=400,
                     detail=f"Path '{p}' is not allowed. Select a specific subdirectory.",
                 )
-        cfg: AppConfig = load_config(Path(req.config_path)) if req.config_path else load_effective_config()
-        job_id = uuid.uuid4().hex
-        jobs[job_id] = JobState(status="running")
-
-        def runner():
-            db = store()
-            for path in iter_documents([Path(p) for p in req.paths], cfg):
-                j = jobs[job_id]
-                j.found += 1
-                fp = fingerprint(path)
-                existing = db.get_document(str(fp.path))
-                if existing and existing["sha256"] == fp.sha256 and existing["modified_at"] == fp.modified_at.isoformat():
-                    j.skipped += 1
-                    j.done += 1
-                    continue
-                extractor = extractor_for(path.suffix.lower())
-                if extractor is None:
-                    j.done += 1
-                    continue
-                result = extractor.extract(path)
-                db.upsert_document(fp, result)
-                if result.status == "error":
-                    j.errors += 1
-                elif existing:
-                    j.updated += 1
-                else:
-                    j.indexed += 1
-                j.done += 1
-            jobs[job_id].status = "finished"
-
-        threading.Thread(target=runner, daemon=True).start()
-        return {"job_id": job_id}
+        job_id = job_store.enqueue(
+            "index_paths",
+            payload={"paths": req.paths, "config_path": req.config_path},
+            owner_user_id=admin_id,
+            max_retries=0,
+        )
+        return {"job_id": str(job_id)}
 
     @app.get("/api/index/jobs/{job_id}")
     def api_index_job(job_id: str, x_auth_token: str | None = Header(default=None)):
-        require_user(x_auth_token)
-        job = jobs.get(job_id)
-        if not job:
+        user_id = require_user(x_auth_token)
+        try:
+            jid = int(job_id)
+        except ValueError:
             raise HTTPException(status_code=404, detail="Job not found")
-        return job.__dict__
+        job = job_store.get(jid)
+        if not job or job["kind"] != "index_paths":
+            raise HTTPException(status_code=404, detail="Job not found")
+        # ACL: owner or admin
+        is_admin = store().get_user_by_id(user_id)["role"] == "admin"
+        if not is_admin and job["owner_user_id"] != user_id:
+            raise HTTPException(status_code=404, detail="Job not found")
+        progress = json.loads(job["progress_json"]) if job["progress_json"] else {}
+        state_to_status = {
+            "pending": "queued",
+            "running": "running",
+            "succeeded": "finished",
+            "failed": "failed",
+            "interrupted": "interrupted",
+        }
+        return {
+            "status": state_to_status.get(job["state"], job["state"]),
+            "found":   int(progress.get("found", 0)),
+            "indexed": int(progress.get("indexed", 0)),
+            "skipped": int(progress.get("skipped", 0)),
+            "updated": int(progress.get("updated", 0)),
+            "errors":  int(progress.get("errors", 0)),
+            "done":    int(progress.get("done", 0)),
+        }
 
     @app.get("/api/index/extensions")
     def api_index_extensions(x_auth_token: str | None = Header(default=None)):
@@ -968,42 +1010,17 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         key_cfg = _resolve_ha_key(x_api_key)
         if not key_cfg:
             raise HTTPException(status_code=401, detail="Invalid or missing API key")
-        cfg = load_effective_config()
         raw_cfg: dict = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
         paths = [sp["path"] for sp in raw_cfg.get("source_paths", []) if sp.get("path")]
         if not paths:
             raise HTTPException(status_code=400, detail="No source paths configured in config.json")
-        job_id = uuid.uuid4().hex
-        jobs[job_id] = JobState(status="running")
-
-        def runner():
-            db = store()
-            for path in iter_documents([Path(p) for p in paths], cfg):
-                j = jobs[job_id]
-                j.found += 1
-                fp = fingerprint(path)
-                existing = db.get_document(str(fp.path))
-                if existing and existing["sha256"] == fp.sha256 and existing["modified_at"] == fp.modified_at.isoformat():
-                    j.skipped += 1
-                    j.done += 1
-                    continue
-                extractor = extractor_for(path.suffix.lower())
-                if extractor is None:
-                    j.done += 1
-                    continue
-                result = extractor.extract(path)
-                db.upsert_document(fp, result)
-                if result.status == "error":
-                    j.errors += 1
-                elif existing:
-                    j.updated += 1
-                else:
-                    j.indexed += 1
-                j.done += 1
-            jobs[job_id].status = "finished"
-
-        threading.Thread(target=runner, daemon=True).start()
-        return {"job_id": job_id, "paths": paths}
+        job_id = job_store.enqueue(
+            "index_paths",
+            payload={"paths": paths, "config_path": None},
+            owner_user_id=None,
+            max_retries=0,
+        )
+        return {"job_id": str(job_id), "paths": paths}
 
     @app.get("/api/system/dependencies")
     def api_dependencies(x_auth_token: str | None = Header(default=None)):
