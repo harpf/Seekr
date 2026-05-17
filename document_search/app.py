@@ -800,7 +800,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         if not job or job["kind"] != "index_paths":
             raise HTTPException(status_code=404, detail="Job not found")
         # ACL: owner or admin
-        is_admin = store().get_user_by_id(user_id)["role"] == "admin"
+        user_row = store().get_user_by_id(user_id)
+        is_admin = bool(user_row) and user_row["role"] == "admin"
         if not is_admin and job["owner_user_id"] != user_id:
             raise HTTPException(status_code=404, detail="Job not found")
         progress = json.loads(job["progress_json"]) if job["progress_json"] else {}
@@ -1454,7 +1455,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             jid = int(job_id)
             job = job_store.get(jid)
             if job and job["kind"] in ("ai_suggest_structure", "ai_reorganize"):
-                is_admin = store().get_user_by_id(user_id)["role"] == "admin"
+                user_row = store().get_user_by_id(user_id)
+                is_admin = bool(user_row) and user_row["role"] == "admin"
                 if not is_admin and job["owner_user_id"] != user_id:
                     raise HTTPException(status_code=404, detail="Job not found")
                 import json

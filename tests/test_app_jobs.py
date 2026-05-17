@@ -204,3 +204,51 @@ def test_retry_recovers_from_transient_failure(tmp_path):
             time.sleep(0.05)
         assert job["state"] == "succeeded"
         assert job["retry_count"] == 1
+
+
+def test_index_job_returns_404_when_user_deleted_mid_session(tmp_path):
+    """If a user is deleted from the DB while their session token is still
+    held, accessing a job they don't own (or even one they do own) must NOT
+    raise a 500. Currently it does, because the GET endpoint does
+    `get_user_by_id(user_id)["role"]` without a None check.
+    """
+    from document_search.app import create_app
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        admin_token = _login(client)
+        # Create a second user, get their session, then delete them.
+        r = client.post(
+            "/api/users",
+            headers={"X-Auth-Token": admin_token},
+            json={"username": "alice", "password": "alicepw1", "role": "user"},
+        )
+        assert r.status_code == 200, r.text
+        alice_token = _login(client, "alice", "alicepw1")
+
+        # Enqueue a job as admin (so alice doesn't own it)
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        r = client.post(
+            "/api/index/start",
+            headers={"X-Auth-Token": admin_token},
+            json={"paths": [str(empty)]},
+        )
+        job_id = r.json()["job_id"]
+
+        # Delete alice
+        alice_id = None
+        users = client.get("/api/users", headers={"X-Auth-Token": admin_token}).json()
+        for u in users.get("users", users) if isinstance(users, dict) else users:
+            if u["username"] == "alice":
+                alice_id = u["id"]
+                break
+        assert alice_id is not None, f"alice not found in users list: {users}"
+        client.delete(f"/api/users/{alice_id}", headers={"X-Auth-Token": admin_token})
+
+        # Now alice's token is still in the in-memory sessions dict but the
+        # underlying user row is gone. Accessing the job must NOT 500.
+        r = client.get(
+            f"/api/index/jobs/{job_id}",
+            headers={"X-Auth-Token": alice_token},
+        )
+        assert r.status_code == 404, f"expected 404, got {r.status_code}: {r.text}"
