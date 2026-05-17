@@ -34,6 +34,7 @@ def _browse_all(
     tags: list[str],
     user_id: int | None,
     limit: int,
+    bypass_acl: bool = False,
 ):
     where = ["1=1"]
     params: list = []
@@ -98,7 +99,11 @@ def search(
     modified_to: str | None = None,
     tags: list[str] | None = None,
     user_id: int | None = None,
+    bypass_acl: bool = False,
 ):
+    if user_id is None and not bypass_acl:
+        raise ValueError("user_id is required unless bypass_acl=True is set explicitly")
+
     tags = [t.lower().strip() for t in (tags or [])]
     match_query = build_match_query(query, filetype, block_type)
 
@@ -106,6 +111,7 @@ def search(
         return _browse_all(
             store, filetype, path_filter, block_type,
             modified_from, modified_to, tags, user_id, limit,
+            bypass_acl=bypass_acl,
         )
 
     # snippet() column 7 = text (0-based FTS5 index order in content_fts)
@@ -140,6 +146,11 @@ def search(
                 HAVING COUNT(DISTINCT ut.name) = ?
             )"""
         params.extend([user_id] + tags + [len(tags)])
+    if not bypass_acl:
+        from document_search.services.acl_service import visible_document_ids_subquery
+        acl_sql, acl_params = visible_document_ids_subquery(user_id)
+        sql += f" AND d.id IN ({acl_sql})"
+        params.extend(acl_params)
     sql += " ORDER BY c.rank LIMIT ?"
     params.append(limit)
     return store.conn.execute(sql, tuple(params)).fetchall()
