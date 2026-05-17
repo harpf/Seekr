@@ -135,6 +135,27 @@ class SqliteStore:
             CREATE INDEX IF NOT EXISTS idx_acl_doc        ON document_acl(document_id);
             CREATE INDEX IF NOT EXISTS idx_acl_principal  ON document_acl(principal_id);
             CREATE INDEX IF NOT EXISTS idx_user_groups_pid ON user_groups(principal_id);
+            CREATE TABLE IF NOT EXISTS jobs (
+              id INTEGER PRIMARY KEY,
+              kind TEXT NOT NULL,
+              state TEXT NOT NULL CHECK(state IN ('pending','running','succeeded','failed','interrupted')),
+              payload_json TEXT NOT NULL,
+              progress_json TEXT,
+              result_json TEXT,
+              error_message TEXT,
+              retry_count INTEGER NOT NULL DEFAULT 0,
+              max_retries INTEGER NOT NULL DEFAULT 0,
+              owner_user_id INTEGER,
+              created_at TEXT NOT NULL,
+              started_at TEXT,
+              finished_at TEXT,
+              next_attempt_at TEXT,
+              FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_jobs_state          ON jobs(state);
+            CREATE INDEX IF NOT EXISTS idx_jobs_kind_state     ON jobs(kind, state);
+            CREATE INDEX IF NOT EXISTS idx_jobs_next_attempt   ON jobs(state, next_attempt_at);
+            CREATE INDEX IF NOT EXISTS idx_jobs_owner          ON jobs(owner_user_id);
             """
         )
         # Migration: add role column for existing databases
