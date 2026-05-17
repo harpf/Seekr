@@ -71,3 +71,64 @@ def test_index_job_404_for_unknown_id(tmp_path):
         token = _login(client)
         r = client.get("/api/index/jobs/999999", headers={"X-Auth-Token": token})
         assert r.status_code == 404
+
+
+def test_ai_suggest_structure_persists_and_shape(tmp_path, monkeypatch):
+    """The route enqueues a job; we replace the handler with a stub so we don't
+    need a live Ollama. We register a fake handler on the worker BEFORE startup."""
+    from document_search.app import create_app
+    app = create_app(str(tmp_path / "t.db"))
+
+    # Override the real handler with a stub that returns a deterministic structure.
+    # This must happen before the worker picks up jobs, but after registration.
+    @app.state.worker.handler("ai_suggest_structure")
+    def _stub(payload, progress_cb):
+        return {"structure": ["projects/", "archive/"]}
+
+    with TestClient(app) as client:
+        token = _login(client)
+        r = client.post("/api/ai/suggest-structure", headers={"X-Auth-Token": token}, json={})
+        assert r.status_code == 200, r.text
+        job_id = r.json()["job_id"]
+        # Poll for completion
+        import time
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            r = client.get(f"/api/ai/jobs/{job_id}", headers={"X-Auth-Token": token})
+            assert r.status_code == 200, r.text
+            body = r.json()
+            if body["status"] == "finished":
+                break
+            time.sleep(0.05)
+        assert body["status"] == "finished"
+        assert body["result"] == {"structure": ["projects/", "archive/"]}
+
+
+def test_ai_reorganize_persists_and_shape(tmp_path):
+    from document_search.app import create_app
+    app = create_app(str(tmp_path / "t.db"))
+
+    @app.state.worker.handler("ai_reorganize")
+    def _stub(payload, progress_cb):
+        progress_cb({"total": 2, "done": 0, "results": []})
+        progress_cb({"total": 2, "done": 1, "results": [{"id": 1}]})
+        progress_cb({"total": 2, "done": 2, "results": [{"id": 1}, {"id": 2}]})
+        return {"total": 2, "done": 2, "results": [{"id": 1}, {"id": 2}]}
+
+    with TestClient(app) as client:
+        token = _login(client)
+        r = client.post("/api/ai/reorganize/start", headers={"X-Auth-Token": token}, json={"limit": 10})
+        assert r.status_code == 200, r.text
+        job_id = r.json()["job_id"]
+        import time
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            r = client.get(f"/api/ai/jobs/{job_id}", headers={"X-Auth-Token": token})
+            body = r.json()
+            if body["status"] == "finished":
+                break
+            time.sleep(0.05)
+        assert body["status"] == "finished"
+        assert body["total"] == 2
+        assert body["done"] == 2
+        assert len(body["results"]) == 2

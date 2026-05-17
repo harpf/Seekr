@@ -327,6 +327,69 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             progress_cb(dict(counts))
         return counts
 
+    @worker.handler("ai_suggest_structure")
+    def _handle_ai_suggest_structure(payload: dict, progress_cb):
+        sample_size = payload.get("sample_size", 50)
+        db = SqliteStore(Path(db_path))
+        rows = db.conn.execute(
+            """
+            SELECT d.id, d.filename, d.extension, d.path,
+                   GROUP_CONCAT(ut.name, ', ') AS tags
+            FROM documents d
+            LEFT JOIN document_tags dt ON dt.document_id = d.id
+            LEFT JOIN user_tags ut ON ut.id = dt.tag_id
+            GROUP BY d.id
+            ORDER BY RANDOM()
+            LIMIT ?
+            """,
+            (min(sample_size, 100),),
+        ).fetchall()
+        result = organizer.suggest_structure([dict(r) for r in rows])
+        return result
+
+    @worker.handler("ai_reorganize")
+    def _handle_ai_reorganize(payload: dict, progress_cb):
+        limit = payload.get("limit", 10)
+        db = SqliteStore(Path(db_path))
+        rows = db.conn.execute(
+            "SELECT id, path, filename, extension FROM documents LIMIT ?",
+            (min(limit, 50),),
+        ).fetchall()
+        eligible = [r for r in rows if Path(r["path"]).is_relative_to(upload_root.resolve())]
+        state = {"total": len(eligible), "done": 0, "results": []}
+        progress_cb(dict(state))
+        for doc in eligible:
+            blocks = db.conn.execute(
+                "SELECT text FROM content_blocks WHERE document_id=? LIMIT 6",
+                (doc["id"],),
+            ).fetchall()
+            text = " ".join(b["text"][:500] for b in blocks)
+            sug = organizer.suggest(
+                file_path=Path(doc["path"]),
+                extracted_text=text,
+                tags=[],
+                metadata={"filename": doc["filename"], "extension": doc["extension"]},
+            )
+            state["results"].append({
+                "document_id": doc["id"],
+                "current_path": doc["path"],
+                "filename": doc["filename"],
+                "suggested_subpath": sug.suggested_subpath,
+                "suggested_tags": sug.suggested_tags,
+                "reason": sug.reason,
+            })
+            state["done"] += 1
+            progress_cb({
+                "total": state["total"],
+                "done": state["done"],
+                "results": list(state["results"]),
+            })
+        return {
+            "total": state["total"],
+            "done": state["done"],
+            "results": state["results"],
+        }
+
     def store() -> SqliteStore:
         """Return a per-thread SqliteStore, creating it once on first use."""
         if not getattr(_thread_local, "initialized", False):
@@ -586,31 +649,14 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         sample_size: int = 50,
         x_auth_token: str | None = Header(default=None),
     ):
-        require_user(x_auth_token)
-        job_id = uuid.uuid4().hex
-        ai_jobs[job_id] = {"status": "running", "result": None}
-
-        def runner():
-            db = store()
-            rows = db.conn.execute(
-                """
-                SELECT d.id, d.filename, d.extension, d.path,
-                       GROUP_CONCAT(ut.name, ', ') AS tags
-                FROM documents d
-                LEFT JOIN document_tags dt ON dt.document_id = d.id
-                LEFT JOIN user_tags ut ON ut.id = dt.tag_id
-                GROUP BY d.id
-                ORDER BY RANDOM()
-                LIMIT ?
-                """,
-                (min(sample_size, 100),),
-            ).fetchall()
-            result = organizer.suggest_structure([dict(r) for r in rows])
-            ai_jobs[job_id]["status"] = "finished"
-            ai_jobs[job_id]["result"] = result
-
-        threading.Thread(target=runner, daemon=True).start()
-        return {"job_id": job_id}
+        user_id = require_user(x_auth_token)
+        job_id = job_store.enqueue(
+            "ai_suggest_structure",
+            payload={"sample_size": sample_size},
+            owner_user_id=user_id,
+            max_retries=0,
+        )
+        return {"job_id": str(job_id)}
 
     @app.post("/api/upload")
     async def api_upload(
@@ -1402,55 +1448,55 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     @app.get("/api/ai/jobs/{job_id}")
     def api_ai_job(job_id: str, x_auth_token: str | None = Header(default=None)):
-        require_user(x_auth_token)
-        job = ai_jobs.get(job_id)
-        if not job:
-            raise HTTPException(status_code=404, detail="AI job not found")
-        return job
+        user_id = require_user(x_auth_token)
+        # First: persistent jobs (numeric ID)
+        if job_id.isdigit():
+            jid = int(job_id)
+            job = job_store.get(jid)
+            if job and job["kind"] in ("ai_suggest_structure", "ai_reorganize"):
+                is_admin = store().get_user_by_id(user_id)["role"] == "admin"
+                if not is_admin and job["owner_user_id"] != user_id:
+                    raise HTTPException(status_code=404, detail="Job not found")
+                import json
+                state_to_status = {
+                    "pending": "queued",
+                    "running": "running",
+                    "succeeded": "finished",
+                    "failed": "failed",
+                    "interrupted": "interrupted",
+                }
+                response: dict = {"status": state_to_status.get(job["state"], job["state"])}
+                progress = json.loads(job["progress_json"]) if job["progress_json"] else {}
+                result   = json.loads(job["result_json"])   if job["result_json"]   else None
+                if job["kind"] == "ai_suggest_structure":
+                    response["result"] = result if job["state"] == "succeeded" else None
+                else:  # ai_reorganize
+                    final = result or progress or {}
+                    response["total"]   = final.get("total", 0)
+                    response["done"]    = final.get("done", 0)
+                    response["results"] = final.get("results", [])
+                if job["state"] == "failed":
+                    response["error"] = job["error_message"]
+                return response
+        # Fallback: in-memory ai_jobs (e.g. ai_pull_model still lives here)
+        legacy = ai_jobs.get(job_id)
+        if not legacy:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return legacy
 
     @app.post("/api/ai/reorganize/start")
     def api_ai_reorganize_start(
         limit: int = 10,
         x_auth_token: str | None = Header(default=None),
     ):
-        require_admin(x_auth_token)
-        job_id = uuid.uuid4().hex
-        ai_jobs[job_id] = {"status": "running", "results": [], "total": 0, "done": 0}
-        upload_root_str = str(upload_root.resolve())
-
-        def runner():
-            db = store()
-            rows = db.conn.execute(
-                "SELECT id, path, filename, extension FROM documents LIMIT ?", (min(limit, 50),)
-            ).fetchall()
-            eligible = [r for r in rows if Path(r["path"]).is_relative_to(upload_root.resolve())]
-            ai_jobs[job_id]["total"] = len(eligible)
-
-            for doc in eligible:
-                blocks = db.conn.execute(
-                    "SELECT text FROM content_blocks WHERE document_id=? LIMIT 6", (doc["id"],)
-                ).fetchall()
-                text = " ".join(b["text"][:500] for b in blocks)
-                sug = organizer.suggest(
-                    file_path=Path(doc["path"]),
-                    extracted_text=text,
-                    tags=[],
-                    metadata={"filename": doc["filename"], "extension": doc["extension"]},
-                )
-                ai_jobs[job_id]["results"].append({
-                    "document_id": doc["id"],
-                    "current_path": doc["path"],
-                    "filename": doc["filename"],
-                    "suggested_subpath": sug.suggested_subpath,
-                    "suggested_tags": sug.suggested_tags,
-                    "reason": sug.reason,
-                })
-                ai_jobs[job_id]["done"] += 1
-
-            ai_jobs[job_id]["status"] = "finished"
-
-        threading.Thread(target=runner, daemon=True).start()
-        return {"job_id": job_id}
+        admin_id = require_admin(x_auth_token)
+        job_id = job_store.enqueue(
+            "ai_reorganize",
+            payload={"limit": limit},
+            owner_user_id=admin_id,
+            max_retries=0,
+        )
+        return {"job_id": str(job_id)}
 
     @app.post("/api/ai/reorganize/apply")
     def api_ai_reorganize_apply(
