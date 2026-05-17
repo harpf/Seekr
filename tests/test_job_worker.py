@@ -127,3 +127,33 @@ def test_max_concurrent_caps_in_flight(setup):
     barrier_lock.release()
     worker.wait_until_idle(timeout=3.0)
     assert len(started) == 3
+
+
+def test_app_startup_creates_worker_and_marks_interrupted(tmp_path, monkeypatch):
+    """The FastAPI app must instantiate a Worker and run mark_interrupted_running_jobs
+    at startup."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from document_search.app import create_app
+    from document_search.index.sqlite_store import SqliteStore
+
+    db_path = tmp_path / "test.db"
+    # Seed the DB with a 'running' job from a pretend prior process
+    seed = SqliteStore(db_path)
+    from document_search.services.job_store import JobStore
+    js = JobStore(seed)
+    job_id = js.enqueue("demo", {})
+    seed.conn.execute("UPDATE jobs SET state='running' WHERE id=?", (job_id,))
+    seed.conn.commit()
+    seed.conn.close()
+
+    app = create_app(str(db_path))
+    with TestClient(app):  # triggers startup
+        post_startup = SqliteStore(db_path)
+        row = post_startup.conn.execute(
+            "SELECT state FROM jobs WHERE id=?", (job_id,)
+        ).fetchone()
+        assert row["state"] == "interrupted"
+        # The app must expose its worker for handlers to register
+        assert hasattr(app.state, "worker")
+        assert hasattr(app.state, "job_store")

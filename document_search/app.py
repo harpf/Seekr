@@ -266,6 +266,24 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     upload_root = Path(os.getenv("DOCUMENT_SEARCH_UPLOAD_ROOT", "/documents/uploads"))
     organizer = AiOrganizer()
 
+    # Persistent job queue
+    from document_search.services.job_store import JobStore
+    from document_search.services.job_worker import Worker
+    _startup_db = SqliteStore(Path(db_path))
+    job_store = JobStore(_startup_db)
+    worker = Worker(job_store, max_concurrent=4, poll_interval_s=1.0)
+    app.state.job_store = job_store
+    app.state.worker = worker
+
+    @app.on_event("startup")
+    def _start_worker() -> None:
+        job_store.mark_interrupted_running_jobs()
+        worker.start()
+
+    @app.on_event("shutdown")
+    def _stop_worker() -> None:
+        worker.stop(timeout=5.0)
+
     def store() -> SqliteStore:
         """Return a per-thread SqliteStore, creating it once on first use."""
         if not getattr(_thread_local, "initialized", False):
