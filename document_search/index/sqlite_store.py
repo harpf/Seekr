@@ -244,6 +244,17 @@ class SqliteStore:
             ),
         )
         doc_id = self.conn.execute("SELECT id FROM documents WHERE path = ?", (str(fp.path),)).fetchone()[0]
+        # Foundational ACL: every newly indexed document gets public read.
+        # Mirrors _backfill_acl so freshly indexed docs are immediately visible to all users.
+        public_row = self.conn.execute(
+            "SELECT id FROM principals WHERE type='group' AND external_id='public'"
+        ).fetchone()
+        if public_row is not None:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO document_acl(document_id, principal_id, permission, granted_at) "
+                "VALUES(?,?, 'read', ?)",
+                (doc_id, public_row["id"], now),
+            )
         path_str = str(fp.path)
         name_str = fp.path.name
         ext_str = fp.path.suffix.lower()

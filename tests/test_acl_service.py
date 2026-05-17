@@ -162,3 +162,37 @@ def test_subquery_owner_always_visible(store):
     visible = {r[0] for r in store.conn.execute(f"SELECT document_id FROM ({sql})", params).fetchall()}
     owned_id = store.conn.execute("SELECT id FROM documents WHERE path='/d/owned.pdf'").fetchone()["id"]
     assert owned_id in visible
+
+
+def test_upsert_document_grants_public_read(store, tmp_path):
+    """A document inserted via upsert_document must immediately have a public read ACL —
+    not only after the next restart triggers _backfill_acl."""
+    from datetime import UTC, datetime
+    from document_search.models import ContentBlock, ExtractionResult, FileFingerprint
+
+    f = tmp_path / "fresh.txt"
+    f.write_text("hello")
+    fp = FileFingerprint(
+        path=f,
+        file_size=5,
+        modified_at=datetime.now(tz=UTC),
+        sha256="freshhash",
+    )
+    ext = ExtractionResult(
+        file_path=f,
+        status="ok",
+        error_message=None,
+        document_metadata={},
+        blocks=[ContentBlock(block_type="paragraph", block_number=1, text="hello", extractor="txt", metadata={})],
+    )
+    doc_id = store.upsert_document(fp, ext)
+
+    public_id = store.conn.execute(
+        "SELECT id FROM principals WHERE type='group' AND external_id='public'"
+    ).fetchone()["id"]
+    row = store.conn.execute(
+        "SELECT permission FROM document_acl WHERE document_id=? AND principal_id=?",
+        (doc_id, public_id),
+    ).fetchone()
+    assert row is not None, "upsert_document must grant public read at insert time"
+    assert row["permission"] == "read"
