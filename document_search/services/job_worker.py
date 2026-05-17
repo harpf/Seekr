@@ -40,13 +40,6 @@ class Worker:
         self._inflight_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._poll_thread: threading.Thread | None = None
-        # Serialises all JobStore interactions originating in the worker
-        # (claim_next, mark_succeeded, mark_failed, update_progress, and the
-        # direct unknown-kind UPDATE). The underlying sqlite3.Connection is
-        # configured with check_same_thread=False, but Python's sqlite3 module
-        # does not guarantee concurrent `.execute()` calls on the same
-        # connection from different threads are safe — they must be serialised.
-        self._store_lock = threading.Lock()
 
     def handler(self, kind: str):
         """Decorator: register a handler for a job kind."""
@@ -96,8 +89,7 @@ class Worker:
         while True:
             if not self._semaphore.acquire(blocking=False):
                 return dispatched
-            with self._store_lock:
-                job = self.job_store.claim_next()
+            job = self.job_store.claim_next()
             if job is None:
                 self._semaphore.release()
                 return dispatched
@@ -122,35 +114,24 @@ class Worker:
             handler = self._handlers.get(kind)
             if handler is None:
                 # Unknown kind is a permanent failure: a worker without the
-                # handler will never succeed, so skip the retry path. We write
-                # directly rather than calling mark_failed (which would retry
-                # while max_retries > retry_count).
-                from datetime import UTC, datetime
-                msg = f"no handler registered for kind '{kind}'"
-                with self._store_lock:
-                    self.job_store.conn.execute(
-                        "UPDATE jobs SET state='failed', error_message=?, "
-                        "finished_at=? WHERE id=?",
-                        (msg, datetime.now(tz=UTC).isoformat(), job_id),
-                    )
-                    self.job_store.conn.commit()
+                # handler will never succeed, so skip the retry path.
+                self.job_store.mark_failed_permanent(
+                    job_id, f"no handler registered for kind '{kind}'"
+                )
                 return
             import json
             payload = json.loads(job["payload_json"])
 
             def progress_cb(p: dict) -> None:
-                with self._store_lock:
-                    self.job_store.update_progress(job_id, p)
+                self.job_store.update_progress(job_id, p)
 
             try:
                 result = handler(payload, progress_cb)
             except Exception as exc:
                 log.exception("Handler %s failed for job %s", kind, job_id)
-                with self._store_lock:
-                    self.job_store.mark_failed(job_id, f"{type(exc).__name__}: {exc}")
+                self.job_store.mark_failed(job_id, f"{type(exc).__name__}: {exc}")
                 return
-            with self._store_lock:
-                self.job_store.mark_succeeded(job_id, result if isinstance(result, dict) else None)
+            self.job_store.mark_succeeded(job_id, result if isinstance(result, dict) else None)
         finally:
             with self._inflight_lock:
                 self._inflight.discard(threading.current_thread())

@@ -133,3 +133,53 @@ def test_mark_interrupted_running_jobs(store):
     # b is still pending
     row = store.conn.execute("SELECT state FROM jobs WHERE id=?", (b,)).fetchone()
     assert row["state"] == "pending"
+
+
+def test_concurrent_enqueue_and_claim_is_thread_safe(store):
+    """Hammer the JobStore from multiple threads to ensure connection-level
+    serialisation. Without an internal lock, sqlite3.Connection.execute racing
+    against another execute on the same connection raises OperationalError or
+    InterfaceError.
+
+    This is a regression test for the bug discovered in the final review of
+    the persistent job queue plan: _store_lock lived in the Worker only, so
+    request threads racing the worker poll thread on the same Connection
+    intermittently failed with 'cannot commit transaction - SQL statements
+    in progress'.
+    """
+    import threading
+    import json
+
+    js = JobStore(store)
+    errors: list[Exception] = []
+
+    def producer():
+        try:
+            for _ in range(50):
+                js.enqueue("stress", {"x": 1})
+        except Exception as exc:
+            errors.append(exc)
+
+    def consumer():
+        try:
+            for _ in range(50):
+                job = js.claim_next()
+                if job is not None:
+                    js.update_progress(job["id"], {"tick": 1})
+                    js.mark_succeeded(job["id"], {"ok": True})
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=producer) for _ in range(3)] + \
+              [threading.Thread(target=consumer) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=15)
+    assert not errors, f"thread-safety violation: {errors[0]!r}"
+    # Drain any remaining pending jobs so the test asserts stability
+    drained = 0
+    while js.claim_next() is not None:
+        drained += 1
+    # Most jobs should be in 'running'/'succeeded' by now; the test cares
+    # about absence of crashes, not exact counts.
