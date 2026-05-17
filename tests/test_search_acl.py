@@ -105,3 +105,11 @@ def test_browse_all_bypass_acl(populated_store):
     paths = {r["path"] for r in rows}
     assert "/d/shared.txt" in paths
     assert "/d/alice-secret.txt" in paths
+
+
+def test_cli_uses_bypass_acl():
+    """document_search.main.cmd_search must pass bypass_acl=True to search()."""
+    import inspect
+    from document_search import main as main_mod
+    src = inspect.getsource(main_mod.cmd_search)
+    assert "bypass_acl=True" in src, "CLI search must explicitly bypass ACL"
