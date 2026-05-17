@@ -1,6 +1,7 @@
 from pathlib import Path
 import pytest
 from document_search.index.sqlite_store import SqliteStore
+from document_search.services.acl_service import visible_document_ids_subquery
 
 
 @pytest.fixture
@@ -87,3 +88,77 @@ def test_backfill_grants_public_read_to_existing_documents(store, tmp_path):
     ).fetchone()
     assert row is not None
     assert row["permission"] == "read"
+
+
+def test_subquery_returns_sql_and_params(store):
+    sql, params = visible_document_ids_subquery(user_id=1)
+    assert "SELECT" in sql.upper()
+    assert isinstance(params, list)
+    # Subquery must yield a column called document_id
+    assert "document_id" in sql.lower()
+
+
+def test_subquery_yields_only_user_visible_docs(store):
+    from datetime import UTC, datetime
+    now = datetime.now(tz=UTC).isoformat()
+
+    alice_id = store.create_user("alice", "pw-alice")
+    bob_id = store.create_user("bob", "pw-bob")
+
+    # Insert two docs, no ACL rows beyond migration default (which gives 'public')
+    store.conn.execute(
+        "INSERT INTO documents(path, filename, extension, file_size, modified_at, sha256, indexed_at, status) "
+        "VALUES('/d/a.pdf','a.pdf','.pdf',1,?, 'h1', ?, 'ok')", (now, now),
+    )
+    store.conn.execute(
+        "INSERT INTO documents(path, filename, extension, file_size, modified_at, sha256, indexed_at, status) "
+        "VALUES('/d/b.pdf','b.pdf','.pdf',1,?, 'h2', ?, 'ok')", (now, now),
+    )
+    store.conn.commit()
+    # Trigger backfill so the two new docs get 'public' read ACL
+    store2 = SqliteStore(store.db_path)
+
+    # Now revoke 'public' read on doc b and grant it only to alice
+    bob_row = store2.conn.execute("SELECT principal_id FROM users WHERE username='bob'").fetchone()
+    alice_row = store2.conn.execute("SELECT principal_id FROM users WHERE username='alice'").fetchone()
+    public_row = store2.conn.execute(
+        "SELECT id FROM principals WHERE type='group' AND external_id='public'"
+    ).fetchone()
+    b_doc = store2.conn.execute("SELECT id FROM documents WHERE path='/d/b.pdf'").fetchone()["id"]
+    store2.conn.execute("DELETE FROM document_acl WHERE document_id=? AND principal_id=?", (b_doc, public_row["id"]))
+    store2.conn.execute(
+        "INSERT INTO document_acl(document_id, principal_id, permission, granted_at) VALUES(?,?, 'read', ?)",
+        (b_doc, alice_row["principal_id"], now),
+    )
+    store2.conn.commit()
+
+    sql, params = visible_document_ids_subquery(alice_id)
+    alice_visible = {r[0] for r in store2.conn.execute(f"SELECT document_id FROM ({sql})", params).fetchall()}
+    sql, params = visible_document_ids_subquery(bob_id)
+    bob_visible = {r[0] for r in store2.conn.execute(f"SELECT document_id FROM ({sql})", params).fetchall()}
+
+    a_doc = store2.conn.execute("SELECT id FROM documents WHERE path='/d/a.pdf'").fetchone()["id"]
+    assert a_doc in alice_visible and a_doc in bob_visible  # public
+    assert b_doc in alice_visible                            # direct grant
+    assert b_doc not in bob_visible                          # no grant
+
+
+def test_subquery_owner_always_visible(store):
+    from datetime import UTC, datetime
+    now = datetime.now(tz=UTC).isoformat()
+    alice_id = store.create_user("alice", "pw")
+    alice_p = store.conn.execute(
+        "SELECT principal_id FROM users WHERE id=?", (alice_id,)
+    ).fetchone()["principal_id"]
+
+    store.conn.execute(
+        "INSERT INTO documents(path, filename, extension, file_size, modified_at, sha256, indexed_at, status, owner_principal_id) "
+        "VALUES('/d/owned.pdf','owned.pdf','.pdf',1,?, 'h3', ?, 'ok', ?)",
+        (now, now, alice_p),
+    )
+    store.conn.commit()
+    # No ACL rows on this doc at all
+    sql, params = visible_document_ids_subquery(alice_id)
+    visible = {r[0] for r in store.conn.execute(f"SELECT document_id FROM ({sql})", params).fetchall()}
+    owned_id = store.conn.execute("SELECT id FROM documents WHERE path='/d/owned.pdf'").fetchone()["id"]
+    assert owned_id in visible
