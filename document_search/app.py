@@ -416,6 +416,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         try:
             return json.loads(config_path.read_text(encoding="utf-8")).get("ha_api_keys", [])
         except Exception:
+            log.warning("Failed to parse HA keys from config %s; treating as empty", config_path, exc_info=True)
             return []
 
     def _save_ha_keys(keys: list[dict]) -> None:
@@ -424,7 +425,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             try:
                 raw = json.loads(config_path.read_text(encoding="utf-8"))
             except Exception:
-                pass
+                log.warning("Existing config %s is unreadable; overwriting with fresh keys", config_path, exc_info=True)
         raw["ha_api_keys"] = keys
         config_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
 
@@ -753,7 +754,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 if not isinstance(raw_source_paths, list):
                     raw_source_paths = []
             except Exception:
-                pass
+                log.warning("Failed to read source_paths from config %s; returning none", config_path, exc_info=True)
         results = []
         for sp in raw_source_paths:
             path = sp.get("path", "")
