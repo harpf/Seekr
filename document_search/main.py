@@ -8,8 +8,8 @@ from pathlib import Path
 from document_search.config import load_config
 from document_search.crawler import iter_documents
 from document_search.extractors.docx_extractor import DocxTextExtractor
-from document_search.extractors.md_extractor import MdTextExtractor
 from document_search.extractors.legacy_office_extractor import LegacyOfficeTextExtractor
+from document_search.extractors.md_extractor import MdTextExtractor
 from document_search.extractors.pdf_extractor import PdfTextExtractor
 from document_search.extractors.pptx_extractor import PptxTextExtractor
 from document_search.extractors.txt_extractor import TxtTextExtractor

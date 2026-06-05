@@ -1,6 +1,7 @@
 import time
-from pathlib import Path
+
 import pytest
+
 from document_search.index.sqlite_store import SqliteStore
 from document_search.services.job_store import JobStore
 from document_search.services.job_worker import Worker
@@ -134,6 +135,7 @@ def test_app_startup_creates_worker_and_marks_interrupted(tmp_path, monkeypatch)
     at startup."""
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
+
     from document_search.app import create_app
     from document_search.index.sqlite_store import SqliteStore
 

@@ -5,7 +5,7 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from document_search.auth import UserRecord, hash_password, new_salt
+from document_search.auth import hash_password, new_salt
 from document_search.models import ExtractionResult, FileFingerprint
 
 

@@ -1,19 +1,20 @@
 from __future__ import annotations
-import json
+
 import datetime as dt
 import hashlib
 import html
 import ipaddress
+import json
 import os
 import posixpath
 import re
 import secrets
-import sqlite3
-import threading
-import uuid
-import time
 import shutil
+import sqlite3
 import subprocess
+import threading
+import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,8 +36,8 @@ from document_search.auth import verify_password
 from document_search.config import AppConfig, load_config
 from document_search.crawler import iter_documents
 from document_search.extractors.docx_extractor import DocxTextExtractor
-from document_search.extractors.md_extractor import MdTextExtractor
 from document_search.extractors.legacy_office_extractor import LegacyOfficeTextExtractor
+from document_search.extractors.md_extractor import MdTextExtractor
 from document_search.extractors.pdf_extractor import PdfTextExtractor
 from document_search.extractors.pptx_extractor import PptxTextExtractor
 from document_search.extractors.txt_extractor import TxtTextExtractor
@@ -44,7 +45,6 @@ from document_search.index.search_service import search
 from document_search.index.sqlite_store import SqliteStore
 from document_search.services.ai_organizer import AiOrganizer
 from document_search.services.file_service import fingerprint
-
 
 # Singletons — instantiated once at import time, not on every request.
 _EXTRACTORS: dict[str, object] = {
@@ -286,7 +286,6 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     @worker.handler("index_paths")
     def _handle_index_paths(payload: dict, progress_cb):
-        from document_search.crawler import iter_documents
         from document_search.config import load_config
 
         paths = payload["paths"]
@@ -857,7 +856,6 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         latest_commit: str | None = None
         check_error: str | None = None
         import urllib.request as _ur
-        import urllib.error as _ue
         try:
             req = _ur.Request(
                 "https://api.github.com/repos/harpf/Seekr/commits/main",
@@ -1038,7 +1036,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             "path_filter": path_filter,
             "description": req.description,
             "key": secrets.token_hex(32),
-            "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "created_at": dt.datetime.now(dt.UTC).isoformat(),
         }
         keys = _load_ha_keys()
         keys.append(new_key)
@@ -1290,7 +1288,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 except ValueError:
                     san_list.append(x509.DNSName(host))
 
-            now_utc = dt.datetime.now(dt.timezone.utc)
+            now_utc = dt.datetime.now(dt.UTC)
             cert = (
                 x509.CertificateBuilder()
                 .subject_name(subject)
@@ -1395,7 +1393,6 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         # Models from Ollama with sizes
         models: list[dict] = []
         import urllib.request as _ur
-        import urllib.error as _ue
         try:
             with _ur.urlopen(f"{organizer.base_url}/api/tags", timeout=5) as r:
                 data = json.loads(r.read())

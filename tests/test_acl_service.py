@@ -1,5 +1,5 @@
-from pathlib import Path
 import pytest
+
 from document_search.index.sqlite_store import SqliteStore
 from document_search.services.acl_service import visible_document_ids_subquery
 
@@ -168,6 +168,7 @@ def test_upsert_document_grants_public_read(store, tmp_path):
     """A document inserted via upsert_document must immediately have a public read ACL —
     not only after the next restart triggers _backfill_acl."""
     from datetime import UTC, datetime
+
     from document_search.models import ContentBlock, ExtractionResult, FileFingerprint
 
     f = tmp_path / "fresh.txt"

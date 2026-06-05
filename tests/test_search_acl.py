@@ -1,8 +1,10 @@
 from datetime import UTC, datetime
 from pathlib import Path
+
 import pytest
-from document_search.index.sqlite_store import SqliteStore
+
 from document_search.index.search_service import search
+from document_search.index.sqlite_store import SqliteStore
 
 
 @pytest.fixture
@@ -110,6 +112,7 @@ def test_browse_all_bypass_acl(populated_store):
 def test_cli_uses_bypass_acl():
     """document_search.main.cmd_search must pass bypass_acl=True to search()."""
     import inspect
+
     from document_search import main as main_mod
     src = inspect.getsource(main_mod.cmd_search)
     assert "bypass_acl=True" in src, "CLI search must explicitly bypass ACL"
