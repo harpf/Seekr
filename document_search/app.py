@@ -856,7 +856,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             if proc.returncode == 0:
                 current_commit = proc.stdout.strip()
         except Exception:
-            pass
+            log.exception("git rev-parse HEAD failed; falling back to GIT_COMMIT env var")
         if not current_commit:
             current_commit = os.getenv("GIT_COMMIT")
 
@@ -1158,7 +1158,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 test_file.unlink()
                 writable = True
             except Exception:
-                pass
+                log.warning("Write test failed for path %s; marking not writable", p, exc_info=True)
         elif exists and p.is_file():
             readable = os.access(p, os.R_OK)
         return {
@@ -1396,7 +1396,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                             "vram_free_mb": int(parts[2]) if parts[2].isdigit() else None,
                         })
         except Exception:
-            pass
+            log.warning("nvidia-smi unavailable or failed; reporting no GPU info", exc_info=True)
 
         # Models from Ollama with sizes
         models: list[dict] = []
@@ -1414,7 +1414,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                         "modified": m.get("modified_at", "")[:10],
                     })
         except Exception:
-            pass
+            log.warning("Could not list models from Ollama at %s; returning empty list", organizer.base_url, exc_info=True)
 
         # Tier recommendation + fit label per model
         recommendation = _recommend_tier(ram_available_gb) if ram_available_gb is not None else None

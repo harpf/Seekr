@@ -41,3 +41,30 @@ def test_load_ha_keys_logs_warning_on_malformed_config(tmp_path, monkeypatch, ca
     assert any(
         "config" in r.message.lower() for r in caplog.records
     ), f"expected a config-parse warning, got: {[r.message for r in caplog.records]}"
+
+
+def test_nvidia_smi_absence_logs_warning(tmp_path, monkeypatch, caplog):
+    """When nvidia-smi raises (not installed), the block must log a warning and
+    still return gpu_info=None — i.e. the system endpoint must not 500."""
+    import subprocess as _sp
+    from document_search.app import create_app
+    from fastapi.testclient import TestClient
+
+    def _boom(*args, **kwargs):
+        raise FileNotFoundError("nvidia-smi not found")
+
+    monkeypatch.setattr(_sp, "run", _boom)
+
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = client.post(
+            "/api/login", json={"username": "admin", "password": "admin"}
+        ).json()["token"]
+        with caplog.at_level(logging.WARNING, logger="document_search.app"):
+            r = client.get("/api/ai/system-info", headers={"X-Auth-Token": token})
+        assert r.status_code == 200, r.text
+        assert r.json().get("gpu") is None
+    assert any(
+        "nvidia" in rec.message.lower() or "gpu" in rec.message.lower()
+        for rec in caplog.records
+    ), f"expected a GPU warning, got: {[rec.message for rec in caplog.records]}"
