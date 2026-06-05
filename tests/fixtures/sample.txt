@@ -1,0 +1,2 @@
+Seekr indexing smoke fixture.
+Invoice number 12345 for customer ACME.
