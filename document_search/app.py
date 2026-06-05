@@ -639,7 +639,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         if not x_auth_token or x_auth_token not in sessions:
             raise HTTPException(status_code=401, detail="Unauthorized")
         user_id, issued, role = sessions[x_auth_token]
-        if time.time() - issued > 60 * 60 * 8:
+        if time.time() - issued > _SESSION_TTL_S:
             sessions.pop(x_auth_token, None)
             raise HTTPException(status_code=401, detail="Session expired")
         db = store()
