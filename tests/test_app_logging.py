@@ -107,3 +107,21 @@ def test_sessions_hard_cap_evicts_oldest(tmp_path):
         # A real login triggers the cap check
         client.post("/api/login", json={"username": "admin", "password": "admin"})
         assert len(sessions) <= _SESSION_MAX + 1  # +1 for the just-issued real token
+
+
+def test_rate_limit_dict_drops_empty_ip_keys(tmp_path, monkeypatch):
+    """An IP whose failures have all aged out must be removed from the tracker."""
+    import time as _time
+    from fastapi.testclient import TestClient
+    from document_search.app import create_app, _login_failures, _RATE_LIMIT_WINDOW
+
+    _login_failures.clear()
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        # Seed an aged-out failure for a fake IP
+        old = _time.time() - (_RATE_LIMIT_WINDOW + 10)
+        _login_failures["10.0.0.99"] = [old]
+        # Any login attempt runs _check_rate_limit for the *real* client IP, but
+        # the eviction sweep must also drop the aged-out fake IP.
+        client.post("/api/login", json={"username": "admin", "password": "wrong"})
+        assert "10.0.0.99" not in _login_failures, "aged-out IP should be evicted"

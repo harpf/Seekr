@@ -477,10 +477,30 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     app.add_middleware(_SecurityHeaders)
 
     # ── Auth helpers ───────────────────────────────────────────────────
+    def _evict_stale_failures(now: float) -> None:
+        """Drop IP keys whose failures have all aged out, and enforce a cap."""
+        stale = [
+            ip for ip, ts in _login_failures.items()
+            if not any(now - t < _RATE_LIMIT_WINDOW for t in ts)
+        ]
+        for ip in stale:
+            _login_failures.pop(ip, None)
+        if len(_login_failures) > _FAILURE_IP_MAX:
+            overflow = len(_login_failures) - _FAILURE_IP_MAX
+            # Evict the IPs with the oldest most-recent failure first.
+            oldest = sorted(_login_failures.items(), key=lambda kv: max(kv[1]))[:overflow]
+            for ip, _ in oldest:
+                _login_failures.pop(ip, None)
+            log.warning("Rate-limit IP cap %d exceeded; evicted %d oldest IP(s)", _FAILURE_IP_MAX, overflow)
+
     def _check_rate_limit(ip: str) -> None:
         now = time.time()
+        _evict_stale_failures(now)
         recent = [t for t in _login_failures.get(ip, []) if now - t < _RATE_LIMIT_WINDOW]
-        _login_failures[ip] = recent
+        if recent:
+            _login_failures[ip] = recent
+        else:
+            _login_failures.pop(ip, None)
         if len(recent) >= _RATE_LIMIT_MAX:
             raise HTTPException(status_code=429, detail="Too many failed login attempts. Try again in 5 minutes.")
 
