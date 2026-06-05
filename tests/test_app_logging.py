@@ -68,3 +68,42 @@ def test_nvidia_smi_absence_logs_warning(tmp_path, monkeypatch, caplog):
         "nvidia" in rec.message.lower() or "gpu" in rec.message.lower()
         for rec in caplog.records
     ), f"expected a GPU warning, got: {[rec.message for rec in caplog.records]}"
+
+
+def test_expired_sessions_are_evicted_on_login(tmp_path, monkeypatch):
+    """Logging in prunes other expired tokens from the in-memory sessions dict."""
+    import time as _time
+    from fastapi.testclient import TestClient
+    from document_search.app import create_app
+
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        # First login -> token A
+        a = client.post("/api/login", json={"username": "admin", "password": "admin"}).json()["token"]
+        sessions = app.state.sessions  # exposed for testability (added in Step 3)
+        assert a in sessions
+        # Backdate token A's issued-at to 9 hours ago (TTL is 8h) -> expired
+        user_id, _issued, role = sessions[a]
+        sessions[a] = (user_id, _time.time() - 9 * 3600, role)
+        # Second login -> token B; eviction during login must drop the stale A
+        b = client.post("/api/login", json={"username": "admin", "password": "admin"}).json()["token"]
+        assert b in sessions
+        assert a not in sessions, "expired session A should have been evicted"
+
+
+def test_sessions_hard_cap_evicts_oldest(tmp_path):
+    import time as _time
+    from fastapi.testclient import TestClient
+    from document_search.app import create_app
+    from document_search.app import _SESSION_MAX
+
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        sessions = app.state.sessions
+        # Fill past the cap with synthetic, non-expired entries
+        now = _time.time()
+        for i in range(_SESSION_MAX + 5):
+            sessions[f"tok{i}"] = (1, now + i, "user")  # ascending issued-at
+        # A real login triggers the cap check
+        client.post("/api/login", json={"username": "admin", "password": "admin"})
+        assert len(sessions) <= _SESSION_MAX + 1  # +1 for the just-issued real token

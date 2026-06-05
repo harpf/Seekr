@@ -73,6 +73,9 @@ _thread_local = threading.local()
 _login_failures: dict[str, list[float]] = {}
 _RATE_LIMIT_MAX = 10       # max failures
 _RATE_LIMIT_WINDOW = 300   # seconds (5 min)
+_SESSION_TTL_S = 60 * 60 * 8     # 8 hours — single source of truth for session lifetime
+_SESSION_MAX = 10_000            # hard cap on tracked sessions (DoS guard)
+_FAILURE_IP_MAX = 10_000         # hard cap on tracked rate-limit IPs (DoS guard)
 
 # Username / password validation.
 _USERNAME_RE = re.compile(r'^[a-zA-Z0-9_\-.]{1,64}$')
@@ -266,6 +269,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     templates = Jinja2Templates(directory="document_search/web/templates")
     app.mount("/static", StaticFiles(directory="document_search/web/static"), name="static")
     sessions: dict[str, tuple[int, float, str]] = {}
+    app.state.sessions = sessions
     jobs: dict[str, JobState] = {}
     ai_jobs: dict[str, dict] = {}
     upload_root = Path(os.getenv("DOCUMENT_SEARCH_UPLOAD_ROOT", "/documents/uploads"))
@@ -486,6 +490,26 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     def _clear_failures(ip: str) -> None:
         _login_failures.pop(ip, None)
 
+    def _evict_expired_sessions() -> None:
+        """Prune expired sessions and enforce the hard cap.
+
+        Called opportunistically on each login and auth check. O(n) over the
+        sessions dict, but n is bounded by `_SESSION_MAX`.
+        """
+        now = time.time()
+        expired = [t for t, (_uid, issued, _role) in sessions.items() if now - issued > _SESSION_TTL_S]
+        for t in expired:
+            sessions.pop(t, None)
+        if expired:
+            log.info("Evicted %d expired session(s)", len(expired))
+        if len(sessions) > _SESSION_MAX:
+            # Drop the oldest sessions (smallest issued-at) down to the cap.
+            overflow = len(sessions) - _SESSION_MAX
+            oldest = sorted(sessions.items(), key=lambda kv: kv[1][1])[:overflow]
+            for t, _ in oldest:
+                sessions.pop(t, None)
+            log.warning("Session cap %d exceeded; evicted %d oldest session(s)", _SESSION_MAX, overflow)
+
     def _validate_username(username: str) -> None:
         if not _USERNAME_RE.match(username):
             raise HTTPException(status_code=400, detail="Username must be 1–64 characters: letters, digits, _ - . only")
@@ -499,19 +523,21 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             raise HTTPException(status_code=400, detail="ollama_url must start with http:// or https://")
 
     def require_user(token: str | None) -> int:
+        _evict_expired_sessions()
         if not token or token not in sessions:
             raise HTTPException(status_code=401, detail="Unauthorized")
         user_id, issued, _role = sessions[token]
-        if time.time() - issued > 60 * 60 * 8:
+        if time.time() - issued > _SESSION_TTL_S:
             sessions.pop(token, None)
             raise HTTPException(status_code=401, detail="Session expired")
         return user_id
 
     def require_admin(token: str | None) -> int:
+        _evict_expired_sessions()
         if not token or token not in sessions:
             raise HTTPException(status_code=401, detail="Unauthorized")
         user_id, issued, role = sessions[token]
-        if time.time() - issued > 60 * 60 * 8:
+        if time.time() - issued > _SESSION_TTL_S:
             sessions.pop(token, None)
             raise HTTPException(status_code=401, detail="Session expired")
         if role != "admin":
@@ -576,6 +602,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     def api_login(req: LoginRequest, request: Request):
         ip = request.client.host if request.client else "unknown"
         _check_rate_limit(ip)
+        _evict_expired_sessions()
         db = store()
         user = db.get_user(req.username)
         if not user or not verify_password(req.password, user["salt"], user["password_hash"]):
