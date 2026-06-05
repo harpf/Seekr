@@ -4,6 +4,7 @@ import datetime as dt
 import hashlib
 import html
 import ipaddress
+import logging
 import os
 import posixpath
 import re
@@ -44,6 +45,9 @@ from document_search.index.search_service import search
 from document_search.index.sqlite_store import SqliteStore
 from document_search.services.ai_organizer import AiOrganizer
 from document_search.services.file_service import fingerprint
+from document_search.logging_config import configure_logging
+
+log = logging.getLogger(__name__)
 
 
 # Singletons — instantiated once at import time, not on every request.
@@ -246,6 +250,7 @@ _OPENAPI_TAGS = [
 
 
 def create_app(db_path: str = "./document_index.db") -> FastAPI:
+    configure_logging()
     config_path = Path(os.getenv("DOCUMENT_SEARCH_CONFIG_PATH", "./config.json"))
     ssl_dir = Path(os.getenv("DOCUMENT_SEARCH_SSL_DIR", "/data/ssl"))
     app = FastAPI(
