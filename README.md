@@ -542,6 +542,26 @@ pytest -q tests/test_search_service.py
 PYTHONPATH=. pytest -q
 ```
 
+### Linting & type checks
+
+Developer tooling lives in `requirements-dev.txt` and is configured in `pyproject.toml`.
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+
+# Lint (this is the CI gate)
+ruff check .
+
+# Auto-fix the safe set (imports, simple rewrites)
+ruff check . --fix
+
+# Type check (informational; not yet a gate)
+mypy
+```
+
+CI runs `ruff check .` and `pytest -q` on every push and pull request via
+`.github/workflows/ci.yml`; a failing lint or test blocks the merge.
+
 The two FastAPI integration tests (`test_app_status.py`) are skipped automatically when FastAPI is not installed in the active environment.
 
 ---
