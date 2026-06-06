@@ -15,7 +15,7 @@ import subprocess
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 try:
@@ -718,7 +718,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         else:
             doc_id = None
 
-        return {"status": "uploaded", "path": str(out), "document_id": doc_id, "ai_suggestion": suggestion.__dict__}
+        return {"status": "uploaded", "path": str(out), "document_id": doc_id, "ai_suggestion": asdict(suggestion)}
 
     @app.get("/api/folders")
     def api_folders(x_auth_token: str | None = Header(default=None)):
