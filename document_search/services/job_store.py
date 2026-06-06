@@ -13,7 +13,6 @@ from typing import Any
 
 from document_search.index.sqlite_store import SqliteStore
 
-
 _VALID_STATES = ("pending", "running", "succeeded", "failed", "interrupted")
 
 

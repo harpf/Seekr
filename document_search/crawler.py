@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Iterator
 
 from document_search.config import AppConfig
-
 
 DOC_TYPE_MAP = {
     ".pdf": "pdf",

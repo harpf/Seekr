@@ -6,6 +6,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 from fastapi.testclient import TestClient
+
 from document_search.app import create_app
 
 
@@ -138,7 +139,6 @@ def test_restart_marks_running_jobs_interrupted(tmp_path):
     """Simulate a crash: enqueue + claim, then close the app, then re-open.
     The previously-running job must be marked 'interrupted'."""
     from document_search.app import create_app
-    from document_search.services.job_store import JobStore
     from document_search.index.sqlite_store import SqliteStore
 
     db = tmp_path / "t.db"
@@ -172,7 +172,6 @@ def test_retry_recovers_from_transient_failure(tmp_path):
     """A handler that fails the first time then succeeds: end state is succeeded,
     retry_count == 1."""
     from document_search.app import create_app
-    from document_search.services.job_store import JobStore
 
     db = tmp_path / "t.db"
     app = create_app(str(db))

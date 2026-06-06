@@ -1,5 +1,5 @@
-from pathlib import Path
 import pytest
+
 from document_search.index.sqlite_store import SqliteStore
 
 
@@ -43,6 +43,7 @@ def test_jobs_state_check_constraint(store):
 
 
 import json
+
 from document_search.services.job_store import JobStore
 
 
@@ -148,7 +149,6 @@ def test_concurrent_enqueue_and_claim_is_thread_safe(store):
     in progress'.
     """
     import threading
-    import json
 
     js = JobStore(store)
     errors: list[Exception] = []

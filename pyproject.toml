@@ -1,0 +1,90 @@
+[tool.ruff]
+# AGENTS.md mandates PEP8 + type hints. Line length 120 keeps PEP8 compliance
+# while avoiding a large reformat of the existing source (many lines are 90-115).
+line-length = 120
+target-version = "py311"
+# Only lint the application package and the tests; never the build/venv dirs.
+src = ["document_search", "tests"]
+extend-exclude = [
+    ".venv",
+    "build",
+    "dist",
+    "docs",
+    "deploy",
+    "scripts",
+]
+
+[tool.ruff.lint]
+# Conservative, high-signal rule set:
+#   E/W  pycodestyle (PEP8)        F  pyflakes (real bugs: unused imports/names)
+#   I    isort (import ordering)   UP pyupgrade (py311 idioms)
+#   B    flake8-bugbear (likely bugs: mutable defaults, etc.)
+select = ["E", "W", "F", "I", "UP", "B"]
+ignore = [
+    # E501 line-too-long is handled by `line-length` above; the formatter is off,
+    # so we keep E501 active. Nothing ignored globally at the rule-family level.
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["document_search"]
+combine-as-imports = true
+
+[tool.ruff.lint.per-file-ignores]
+# Tests favour readability over import hygiene: module-level imports placed after
+# an importorskip guard (E402) and unused-fixture-style argument names are normal.
+"tests/*" = ["E402"]
+
+# --- Task 3: narrow, code-scoped ignores for pre-existing violations that are
+# either correct idioms or would require risky reformatting/behavior changes to
+# satisfy. Each entry is a specific file + specific rule with a one-line reason.
+
+# FastAPI dependency-injection defaults (Header(...), File(...), Form(...)) are
+# the documented idiom; B008 (call-in-default-arg) is a false positive here.
+# B904: these `raise HTTPException(...)` sites inside `except` deliberately hide
+# the original error context from API clients; chaining is not wanted. E501:
+# long SQL/format/log string lines whose wrapping would be a risky reformat.
+# F841: pre-existing dead local (legacy `jobs` dict from the in-memory queue).
+"document_search/app.py" = ["B008", "B904", "E501", "F841"]
+# E501: long embedded SQL statements; wrapping them risks behavior changes.
+"document_search/index/sqlite_store.py" = ["E501"]
+# E501: long log/format string lines; behavior-preserving wrapping is non-trivial.
+"document_search/config.py" = ["E501"]
+"document_search/crawler.py" = ["E501"]
+"document_search/extractors/docx_extractor.py" = ["E501"]
+"document_search/extractors/legacy_office_extractor.py" = ["E501"]
+"document_search/extractors/pdf_extractor.py" = ["E501"]
+"document_search/extractors/pptx_extractor.py" = ["E501"]
+# B017: intentionally asserts a blind Exception — the test verifies the sqlite
+# CHECK constraint rejects an invalid job state (any error type is acceptable).
+"tests/test_job_store.py" = ["B017"]
+# E501: long assertion/setup line; F841: bound-but-unused row read in a test.
+"tests/test_acl_service.py" = ["E501", "F841"]
+# F841: bound-but-unused id list captured for readability in a test.
+"tests/test_job_worker.py" = ["F841"]
+
+[tool.mypy]
+# Lenient baseline. The codebase is not fully annotated yet, so we start
+# permissive and tighten in a later plan. CI runs mypy informationally
+# (continue-on-error) until the baseline is clean.
+python_version = "3.11"
+warn_unused_configs = true
+ignore_missing_imports = true
+no_implicit_optional = true
+warn_redundant_casts = true
+# Deliberately OFF for the first pass (enable incrementally later):
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
+files = ["document_search"]
+
+[[tool.mypy.overrides]]
+# Third-party libs without bundled type stubs — silence missing-stub noise.
+module = [
+    "docx.*",
+    "pptx.*",
+    "pypdf.*",
+    "pdf2image.*",
+    "pytesseract.*",
+    "fitz.*",
+]
+ignore_missing_imports = true
