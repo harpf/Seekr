@@ -966,6 +966,79 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         )
         return {"job_id": str(job_id)}
 
+    @app.post("/api/ai/summarize")
+    def api_ai_summarize(
+        req: dict,
+        x_auth_token: str | None = Header(default=None),
+    ):
+        user_id = require_user(x_auth_token)
+        query = str(req.get("query", "")).strip()
+        if not query:
+            raise HTTPException(status_code=400, detail="query must not be empty")
+        try:
+            k = int(req.get("k", 5))
+        except (TypeError, ValueError):
+            k = 5
+        k = max(1, min(k, 10))
+
+        if not organizer.is_available():
+            raise HTTPException(status_code=502, detail="AI model is not available")
+
+        db = store()
+        try:
+            rows = search(db, query, k, 0, None, None, None, None, None, None, user_id)
+        except FtsQueryError as e:
+            raise HTTPException(
+                status_code=400,
+                detail="Could not parse your search query. Check quotes and operators.",
+            ) from e
+        except sqlite3.OperationalError as e:
+            raise HTTPException(
+                status_code=400, detail="Search query error — check your query syntax."
+            ) from e
+
+        sources: list[dict] = []
+        for i, row in enumerate(rows, start=1):
+            r = dict(row)
+            sources.append({
+                "label": f"S{i}",
+                "document_id": r["document_id"],
+                "block_number": r["block_number"],
+                "filename": r["filename"],
+                "path": r["path"],
+                "text": r.get("snippet") or "",
+            })
+
+        if not sources:
+            return {"summary": "No matching documents were found.", "citations": [], "sources": []}
+
+        from document_search.services.ai_validation import AiValidationError
+        try:
+            result = organizer.summarize_with_citations(query=query, sources=sources)
+        except AiValidationError as e:
+            raise HTTPException(status_code=422, detail=f"AI output validation failed: {e}") from e
+        except Exception as e:
+            raise HTTPException(
+                status_code=502, detail=f"AI summarisation failed: {type(e).__name__}"
+            ) from e
+
+        cited = set(result.citations)
+        return {
+            "summary": result.summary,
+            "citations": result.citations,
+            "sources": [
+                {
+                    "label": s["label"],
+                    "document_id": s["document_id"],
+                    "block_number": s["block_number"],
+                    "filename": s["filename"],
+                    "path": s["path"],
+                    "cited": s["label"] in cited,
+                }
+                for s in sources
+            ],
+        }
+
     @app.post("/api/upload")
     async def api_upload(
         x_auth_token: str | None = Header(default=None),
