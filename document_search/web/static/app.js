@@ -1061,6 +1061,7 @@ function switchTab(name) {
   if (name === 'ssl') loadSslStatus();
   if (name === 'ai') loadAiTabData();
   if (name === 'ha') loadHaKeys();
+  if (name === 'audit') { _auditOffset = 0; loadAudit(); }
   if (name === 'system') { loadDeps(); loadAiStatus(); }
 }
 
@@ -1239,6 +1240,98 @@ function renderUserTable(users) {
         <button class="btn btn-g btn-sm" onclick="openChangePassword(${u.id}, '${escHtml(u.username)}')">Password</button>
         <button class="btn btn-g btn-sm" style="color:var(--red)" onclick="deleteUser(${u.id})">Delete</button>
       </td>
+    </tr>`).join('')
+  }</tbody></table>`;
+}
+
+// ── Audit log ──────────────────────────────────────────────────────
+let _auditOffset = 0;
+let _auditTotal = 0;
+const _AUDIT_LIMIT = 50;
+
+function _auditFilters() {
+  const params = new URLSearchParams();
+  params.set('limit', String(_AUDIT_LIMIT));
+  params.set('offset', String(_auditOffset));
+  const action = document.getElementById('auditActionFilter')?.value;
+  if (action) params.set('action', action);
+  const from = document.getElementById('auditFrom')?.value;
+  if (from) params.set('date_from', `${from}T00:00:00+00:00`);
+  const to = document.getElementById('auditTo')?.value;
+  if (to) params.set('date_to', `${to}T23:59:59+00:00`);
+  return params;
+}
+
+async function loadAudit() {
+  try {
+    const data = await api(`/api/audit?${_auditFilters().toString()}`);
+    _auditTotal = data.total || 0;
+    renderAuditTable(data.items || []);
+    updateAuditPager();
+    setText('auditResult', '', '');
+  } catch (e) {
+    setText('auditResult', e.message, 'err');
+  }
+}
+
+function auditFirstPage() {
+  _auditOffset = 0;
+  loadAudit();
+}
+
+function auditPage(dir) {
+  const next = _auditOffset + dir * _AUDIT_LIMIT;
+  if (next < 0 || next >= _auditTotal) return;
+  _auditOffset = next;
+  loadAudit();
+}
+
+function updateAuditPager() {
+  const prev = document.getElementById('auditPrev');
+  const next = document.getElementById('auditNext');
+  if (prev) prev.disabled = _auditOffset <= 0;
+  if (next) next.disabled = _auditOffset + _AUDIT_LIMIT >= _auditTotal;
+  const summary = document.getElementById('auditSummary');
+  if (summary) {
+    if (_auditTotal === 0) {
+      summary.textContent = '0 entries';
+    } else {
+      const from = _auditOffset + 1;
+      const to = Math.min(_auditOffset + _AUDIT_LIMIT, _auditTotal);
+      summary.textContent = `${from}–${to} of ${_auditTotal}`;
+    }
+  }
+}
+
+function _auditTarget(row) {
+  if (!row.target_type) return '—';
+  return row.target_id != null ? `${row.target_type}#${row.target_id}` : String(row.target_type);
+}
+
+function _auditDetail(row) {
+  if (row.detail == null) return '—';
+  try {
+    return JSON.stringify(row.detail);
+  } catch (_) {
+    return String(row.detail);
+  }
+}
+
+function renderAuditTable(items) {
+  const el = document.getElementById('auditTable');
+  if (!el) return;
+  if (!items.length) {
+    el.innerHTML = '<p class="muted" style="font-size:.82rem;">No audit entries match the current filters.</p>';
+    return;
+  }
+  el.innerHTML = `<table class="u-table"><thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Target</th><th>IP</th><th>Detail</th></tr></thead><tbody>${
+    items.map(row => `<tr>
+      <td class="muted" style="font-size:.78rem;white-space:nowrap;">${escHtml((row.created_at || '').replace('T', ' ').slice(0, 19))}</td>
+      <td>${escHtml(row.actor_username || (row.actor_user_id != null ? `#${row.actor_user_id}` : '—'))}</td>
+      <td><span class="badge badge-n">${escHtml(row.action || '')}</span></td>
+      <td class="muted" style="font-size:.8rem;">${escHtml(_auditTarget(row))}</td>
+      <td class="muted" style="font-size:.78rem;">${escHtml(row.ip || '—')}</td>
+      <td class="muted" style="font-size:.78rem;word-break:break-all;">${escHtml(_auditDetail(row))}</td>
     </tr>`).join('')
   }</tbody></table>`;
 }
