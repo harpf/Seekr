@@ -851,6 +851,7 @@ function switchTab(name) {
   if (btn) btn.classList.add('active');
 
   if (name === 'users') loadUsers();
+  if (name === 'access') loadAccessTab();
   if (name === 'ssl') loadSslStatus();
   if (name === 'ai') loadAiTabData();
   if (name === 'ha') loadHaKeys();
@@ -1105,6 +1106,220 @@ async function submitChangePassword() {
   } catch (e) {
     showToast(e.message, 'err');
     setText('changePwResult', e.message, 'err');
+  }
+}
+
+// ── Access (ACL) ───────────────────────────────────────────────────
+
+let _accessUsersCache = [];
+let _accessGroupsCache = [];
+
+async function loadAccessTab() {
+  try {
+    const [users, groups] = await Promise.all([api('/api/users'), api('/api/groups')]);
+    _accessUsersCache = users;
+    _accessGroupsCache = groups;
+    renderGroupTable(groups);
+    populateAclPrincipalSelect(users, groups);
+  } catch (e) {
+    setText('groupsResult', e.message, 'err');
+  }
+}
+
+function renderGroupTable(groups) {
+  const el = document.getElementById('groupTable');
+  if (!el) return;
+  if (!groups.length) {
+    el.innerHTML = '<p class="muted" style="font-size:.82rem;">No groups yet.</p>';
+    return;
+  }
+  el.innerHTML = `<table class="u-table"><thead><tr><th>ID</th><th>Name</th><th>Members</th><th>Actions</th></tr></thead><tbody>${
+    groups.map(g => {
+      const isPublic = g.external_id === 'public';
+      return `<tr>
+        <td class="muted">${g.id}</td>
+        <td><strong>${escHtml(g.display_name || g.external_id)}</strong> <span class="muted">(${escHtml(g.external_id)})</span></td>
+        <td class="muted">${g.member_count ?? 0}</td>
+        <td>
+          <button class="btn btn-g btn-sm" onclick="openGroupMembers(${g.id}, '${escHtml(g.display_name || g.external_id)}')">Members</button>
+          ${isPublic ? '' : `<button class="btn btn-g btn-sm" style="color:var(--red)" onclick="deleteGroup(${g.id})">Delete</button>`}
+        </td>
+      </tr>`;
+    }).join('')
+  }</tbody></table>`;
+}
+
+async function createGroup() {
+  const name = document.getElementById('newGroupName')?.value?.trim();
+  const display = document.getElementById('newGroupLabel')?.value?.trim() || null;
+  if (!name) { showToast('Group name required', 'err'); return; }
+  try {
+    await api('/api/groups', 'POST', { name, display_name: display });
+    showToast(`Group "${name}" created`, 'ok');
+    if (document.getElementById('newGroupName')) document.getElementById('newGroupName').value = '';
+    if (document.getElementById('newGroupLabel')) document.getElementById('newGroupLabel').value = '';
+    await loadAccessTab();
+  } catch (e) {
+    showToast(e.message, 'err');
+    setText('groupsResult', e.message, 'err');
+  }
+}
+
+async function deleteGroup(groupId) {
+  if (!confirm('Delete this group? Memberships and its grants are removed.')) return;
+  try {
+    await api(`/api/groups/${groupId}`, 'DELETE');
+    showToast('Group deleted', 'ok');
+    document.getElementById('groupMembersCard')?.classList.add('hidden');
+    await loadAccessTab();
+  } catch (e) {
+    showToast(e.message, 'err');
+    setText('groupsResult', e.message, 'err');
+  }
+}
+
+async function openGroupMembers(groupId, label) {
+  const card = document.getElementById('groupMembersCard');
+  const title = document.getElementById('groupMembersTitle');
+  const idInput = document.getElementById('selectedGroupId');
+  if (idInput) idInput.value = String(groupId);
+  if (title) title.textContent = `Members — ${label}`;
+  if (card) card.classList.remove('hidden');
+  await refreshGroupMembers(groupId);
+  card?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function refreshGroupMembers(groupId) {
+  try {
+    const members = await api(`/api/groups/${groupId}/members`);
+    renderGroupMemberTable(members);
+    populateAddMemberSelect(members);
+  } catch (e) {
+    setText('groupMembersResult', e.message, 'err');
+  }
+}
+
+function renderGroupMemberTable(members) {
+  const el = document.getElementById('groupMemberTable');
+  if (!el) return;
+  if (!members.length) {
+    el.innerHTML = '<p class="muted" style="font-size:.82rem;">No members.</p>';
+    return;
+  }
+  const gid = document.getElementById('selectedGroupId')?.value;
+  el.innerHTML = `<table class="u-table"><thead><tr><th>User</th><th>Role</th><th>Actions</th></tr></thead><tbody>${
+    members.map(m => `<tr>
+      <td><strong>${escHtml(m.username)}</strong></td>
+      <td class="muted">${escHtml(m.role || 'user')}</td>
+      <td><button class="btn btn-g btn-sm" style="color:var(--red)" onclick="removeGroupMember(${gid}, ${m.user_id})">Remove</button></td>
+    </tr>`).join('')
+  }</tbody></table>`;
+}
+
+function populateAddMemberSelect(members) {
+  const sel = document.getElementById('addMemberSelect');
+  if (!sel) return;
+  const memberIds = new Set(members.map(m => m.user_id));
+  const available = _accessUsersCache.filter(u => !memberIds.has(u.id));
+  sel.innerHTML = available.length
+    ? available.map(u => `<option value="${u.id}">${escHtml(u.username)}</option>`).join('')
+    : '<option value="">— all users are members —</option>';
+}
+
+async function addGroupMember() {
+  const gid = document.getElementById('selectedGroupId')?.value;
+  const uid = document.getElementById('addMemberSelect')?.value;
+  if (!gid || !uid) { showToast('Select a user', 'err'); return; }
+  try {
+    await api(`/api/groups/${gid}/members`, 'POST', { user_id: Number(uid) });
+    showToast('Member added', 'ok');
+    await refreshGroupMembers(gid);
+    await loadAccessTab();
+    document.getElementById('selectedGroupId').value = gid;
+  } catch (e) {
+    showToast(e.message, 'err');
+    setText('groupMembersResult', e.message, 'err');
+  }
+}
+
+async function removeGroupMember(groupId, userId) {
+  try {
+    await api(`/api/groups/${groupId}/members/${userId}`, 'DELETE');
+    showToast('Member removed', 'ok');
+    await refreshGroupMembers(groupId);
+  } catch (e) {
+    showToast(e.message, 'err');
+    setText('groupMembersResult', e.message, 'err');
+  }
+}
+
+function populateAclPrincipalSelect(users, groups) {
+  const sel = document.getElementById('aclPrincipalSelect');
+  if (!sel) return;
+  const groupOpts = groups.map(g =>
+    `<option value="${g.id}">Group: ${escHtml(g.display_name || g.external_id)}</option>`).join('');
+  sel.innerHTML = groupOpts || '<option value="">— no groups —</option>';
+}
+
+async function loadDocumentAcl() {
+  const docId = document.getElementById('aclDocId')?.value;
+  if (!docId) { showToast('Enter a document ID', 'err'); return; }
+  try {
+    const entries = await api(`/api/acl/documents/${docId}`);
+    renderDocAclTable(docId, entries);
+  } catch (e) {
+    showToast(e.message, 'err');
+    setText('docAclResult', e.message, 'err');
+    const el = document.getElementById('docAclTable');
+    if (el) el.innerHTML = '';
+  }
+}
+
+function renderDocAclTable(docId, entries) {
+  const el = document.getElementById('docAclTable');
+  if (!el) return;
+  if (!entries.length) {
+    el.innerHTML = '<p class="muted" style="font-size:.82rem;">No ACL entries for this document.</p>';
+    return;
+  }
+  el.innerHTML = `<table class="u-table"><thead><tr><th>Principal</th><th>Type</th><th>Permission</th><th>Actions</th></tr></thead><tbody>${
+    entries.map(e => `<tr>
+      <td><strong>${escHtml(e.display_name || e.external_id)}</strong></td>
+      <td class="muted">${escHtml(e.principal_type)}</td>
+      <td>${escHtml(e.permission)}</td>
+      <td><button class="btn btn-g btn-sm" style="color:var(--red)" onclick="revokeDocumentAcl(${docId}, ${e.principal_id}, '${escHtml(e.permission)}')">Revoke</button></td>
+    </tr>`).join('')
+  }</tbody></table>`;
+}
+
+async function grantDocumentAcl() {
+  const docId = document.getElementById('aclDocId')?.value;
+  const principalId = document.getElementById('aclPrincipalSelect')?.value;
+  const permission = document.getElementById('aclPermSelect')?.value;
+  if (!docId || !principalId) { showToast('Document ID and principal required', 'err'); return; }
+  try {
+    await api('/api/acl/grant', 'POST', {
+      document_id: Number(docId), principal_id: Number(principalId), permission,
+    });
+    showToast('Access granted', 'ok');
+    await loadDocumentAcl();
+  } catch (e) {
+    showToast(e.message, 'err');
+    setText('docAclResult', e.message, 'err');
+  }
+}
+
+async function revokeDocumentAcl(docId, principalId, permission) {
+  if (!confirm('Revoke this permission?')) return;
+  try {
+    await api('/api/acl/revoke', 'POST', {
+      document_id: Number(docId), principal_id: Number(principalId), permission,
+    });
+    showToast('Access revoked', 'ok');
+    await loadDocumentAcl();
+  } catch (e) {
+    showToast(e.message, 'err');
+    setText('docAclResult', e.message, 'err');
   }
 }
 
