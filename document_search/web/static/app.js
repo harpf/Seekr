@@ -1901,7 +1901,7 @@ function copyHaYaml() {
 
 // ── Nav & bootstrap ────────────────────────────────────────────────
 function initNav() {
-  const map = { home: '/', search: '/search', ingest: '/ingest', config: '/config', wiki: '/wiki' };
+  const map = { home: '/', search: '/search', ingest: '/ingest', config: '/config', jobs: '/jobs', wiki: '/wiki' };
   const activeHref = map[document.body?.dataset?.page || ''];
   document.querySelectorAll('.nav-links a').forEach(link => {
     if (link.getAttribute('href') === activeHref) link.classList.add('active');
@@ -1966,6 +1966,10 @@ async function bootstrap() {
       );
       initDropZone();
       await loadIngestOptions();
+    }
+    if (document.body?.dataset?.page === 'jobs') {
+      document.getElementById('jobsPanel')?.classList.remove('hidden');
+      await loadJobs();
     }
   }
 }
@@ -2170,4 +2174,100 @@ function renderStructureResult(r) {
       <p class="structure-folder-desc">${escHtml(f.description || '')}</p>
       ${f.examples?.length ? `<div class="structure-folder-examples">${f.examples.map(e => `<span class="badge badge-n" style="font-size:.72rem;">${escHtml(e)}</span>`).join(' ')}</div>` : ''}
     </div>`).join('')}</div>`;
+}
+
+// ── Global Jobs dashboard ──────────────────────────────────────────
+let _jobsPollTimer = null;
+
+function _jobStateBadge(state) {
+  const cls = {
+    pending: 'badge-n', running: 'badge-b', succeeded: 'badge-g',
+    failed: 'badge-a', interrupted: 'badge-a', cancelled: 'badge-n',
+  }[state] || 'badge-n';
+  return `<span class="badge ${cls}">${escHtml(state)}</span>`;
+}
+
+function _jobProgressText(job) {
+  const p = job.progress || {};
+  if (job.kind === 'index_paths') {
+    return `done ${p.done ?? 0} (idx ${p.indexed ?? 0}, upd ${p.updated ?? 0}, skip ${p.skipped ?? 0}, err ${p.errors ?? 0})`;
+  }
+  if (job.kind === 'ai_reorganize') {
+    return `${p.done ?? 0}/${p.total ?? 0}`;
+  }
+  if (job.kind === 'ai_pull') {
+    const c = p.completed ?? 0, t = p.total ?? 0;
+    const pct = t ? Math.round((c / t) * 100) : 0;
+    return p.status ? `${escHtml(p.status)}${t ? ` ${pct}%` : ''}` : '—';
+  }
+  return p.status ? escHtml(String(p.status)) : '—';
+}
+
+function renderJobsTable(jobs) {
+  const tbody = document.getElementById('jobsTbody');
+  const summary = document.getElementById('jobsSummary');
+  if (!tbody) return;
+  if (!jobs.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="muted">No jobs yet.</td></tr>';
+    if (summary) summary.textContent = '0 jobs';
+    return;
+  }
+  const active = jobs.filter(j => j.state === 'pending' || j.state === 'running').length;
+  if (summary) summary.textContent = `${jobs.length} jobs · ${active} active`;
+
+  tbody.innerHTML = jobs.map(j => {
+    const isActive = j.state === 'pending' || j.state === 'running';
+    const isReenqueueable = j.state === 'interrupted' || j.state === 'failed' || j.state === 'cancelled';
+    const actions = [];
+    if (isActive) {
+      const label = j.cancel_requested ? 'Cancelling…' : 'Cancel';
+      const dis = j.cancel_requested ? 'disabled' : '';
+      actions.push(`<button class="btn btn-danger btn-sm" ${dis} onclick="cancelJob(${j.id})">${label}</button>`);
+    }
+    if (isReenqueueable) {
+      actions.push(`<button class="btn btn-g btn-sm" onclick="reEnqueueJob(${j.id})">Re-enqueue</button>`);
+    }
+    const created = (j.created_at || '').replace('T', ' ').slice(0, 19);
+    return `<tr>
+      <td>${j.id}</td>
+      <td><code>${escHtml(j.kind)}</code></td>
+      <td>${_jobStateBadge(j.state)}</td>
+      <td class="muted" style="font-size:.8rem;">${_jobProgressText(j)}</td>
+      <td>${j.retry_count}/${j.max_retries}</td>
+      <td class="muted" style="font-size:.78rem;">${escHtml(created)}</td>
+      <td>${actions.join(' ') || '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadJobs() {
+  try {
+    const jobs = await api('/api/jobs');
+    renderJobsTable(jobs);
+    const active = jobs.some(j => j.state === 'pending' || j.state === 'running');
+    if (_jobsPollTimer) clearTimeout(_jobsPollTimer);
+    if (active) _jobsPollTimer = setTimeout(loadJobs, 2500);
+  } catch (e) {
+    showToast(e.message, 'err');
+  }
+}
+
+async function cancelJob(jobId) {
+  try {
+    const r = await api(`/api/jobs/${jobId}/cancel`, 'POST', {});
+    showToast(r.outcome === 'cancelled' ? 'Job cancelled' : 'Cancellation requested', 'ok');
+    await loadJobs();
+  } catch (e) {
+    showToast(e.message, 'err');
+  }
+}
+
+async function reEnqueueJob(jobId) {
+  try {
+    const r = await api(`/api/jobs/${jobId}/re-enqueue`, 'POST', {});
+    showToast(`Re-enqueued as job ${r.job_id}`, 'ok');
+    await loadJobs();
+  } catch (e) {
+    showToast(e.message, 'err');
+  }
 }

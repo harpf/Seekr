@@ -684,6 +684,10 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     def wiki_page(request: Request):
         return templates.TemplateResponse("wiki.html", {"request": request})
 
+    @app.get("/jobs", response_class=HTMLResponse)
+    def jobs_page(request: Request):
+        return templates.TemplateResponse("jobs.html", {"request": request})
+
 
     @app.get("/api/config")
     def api_get_config(x_auth_token: str | None = Header(default=None)):
