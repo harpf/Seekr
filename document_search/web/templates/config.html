@@ -82,6 +82,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
             Users
           </button>
+          <button class="tab admin-only hidden" onclick="switchTab('access')" data-tab="access">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><circle cx="12" cy="16" r="1"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            Access
+          </button>
           <button class="tab admin-only hidden" onclick="switchTab('ssl')" data-tab="ssl">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
             SSL
@@ -361,6 +365,95 @@
                 <button class="btn btn-g" onclick="cancelChangePassword()">Cancel</button>
               </div>
               <p id="changePwResult" class="feedback"></p>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ─── Tab: Access (ACL) ─── -->
+        <div id="tab-access" class="tab-panel hidden admin-only">
+
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/></svg></div>
+              <div class="card-titles"><h2>Groups</h2><p>Create groups and manage their members</p></div>
+            </div>
+            <div class="card-body">
+              <div id="groupTable" class="u-table-wrap"></div>
+              <p id="groupsResult" class="feedback"></p>
+              <div class="f-grid" style="margin-top:12px;">
+                <div class="f-col">
+                  <label class="f-label" for="newGroupName">Group name</label>
+                  <input id="newGroupName" placeholder="editors" autocomplete="off" />
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="newGroupLabel">Display name (optional)</label>
+                  <input id="newGroupLabel" placeholder="Editors" autocomplete="off" />
+                </div>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-p" onclick="createGroup()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  Create Group
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div id="groupMembersCard" class="card hidden">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7" r="4"/><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/></svg></div>
+              <div class="card-titles"><h2 id="groupMembersTitle">Members</h2><p>Add or remove users from this group</p></div>
+            </div>
+            <div class="card-body">
+              <input type="hidden" id="selectedGroupId" />
+              <div id="groupMemberTable" class="u-table-wrap"></div>
+              <div class="f-grid" style="margin-top:12px; grid-template-columns:1fr auto;">
+                <div class="f-col">
+                  <label class="f-label" for="addMemberSelect">Add user</label>
+                  <select id="addMemberSelect"></select>
+                </div>
+                <div class="f-col" style="align-self:end;">
+                  <button class="btn btn-p" onclick="addGroupMember()">Add</button>
+                </div>
+              </div>
+              <p id="groupMembersResult" class="feedback"></p>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></div>
+              <div class="card-titles"><h2>Document Access</h2><p>Grant or revoke read/write on a single document</p></div>
+            </div>
+            <div class="card-body">
+              <div class="f-grid" style="grid-template-columns:1fr auto;">
+                <div class="f-col">
+                  <label class="f-label" for="aclDocId">Document ID</label>
+                  <input id="aclDocId" type="number" placeholder="e.g. 42" />
+                </div>
+                <div class="f-col" style="align-self:end;">
+                  <button class="btn btn-g" onclick="loadDocumentAcl()">Load ACL</button>
+                </div>
+              </div>
+              <div id="docAclTable" class="u-table-wrap" style="margin-top:12px;"></div>
+              <div class="f-grid" style="margin-top:12px; grid-template-columns:1fr 1fr auto;">
+                <div class="f-col">
+                  <label class="f-label" for="aclPrincipalSelect">Principal</label>
+                  <select id="aclPrincipalSelect"></select>
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="aclPermSelect">Permission</label>
+                  <select id="aclPermSelect">
+                    <option value="read">Read</option>
+                    <option value="write">Write</option>
+                  </select>
+                </div>
+                <div class="f-col" style="align-self:end;">
+                  <button class="btn btn-p" onclick="grantDocumentAcl()">Grant</button>
+                </div>
+              </div>
+              <p id="docAclResult" class="feedback"></p>
             </div>
           </div>
 
