@@ -2381,7 +2381,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             raise _client_error("Invalid certificate.", e, 400)
 
     @app.post("/api/search")
-    def api_search(req: SearchRequest, response: Response, x_auth_token: str | None = Header(default=None)):
+    def api_search(req: SearchRequest, request: Request, response: Response, x_auth_token: str | None = Header(default=None)):
         user_id = require_user(x_auth_token)
         db = store()
         limit = max(1, min(req.limit, 100))
@@ -2450,6 +2450,14 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 "tags": req.tags,
             },
         )
+        _audit(
+            user_id,
+            "search",
+            target_type="query",
+            target_id=None,
+            detail={"query": req.query, "result_count": len(output)},
+            request=request,
+        )
         return output
 
     @app.get("/api/search/history")
@@ -2511,7 +2519,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         return {"documents": docs, "content_blocks": blocks, "total_file_size_bytes": total_size, "db_path": db_path}
 
     @app.get("/api/files/open")
-    def api_files_open(document_id: int, x_auth_token: str | None = Header(default=None)):
+    def api_files_open(document_id: int, request: Request, x_auth_token: str | None = Header(default=None)):
         user_id = require_user(x_auth_token)
         db = store()
         doc = db.get_document_by_id(document_id)
@@ -2522,6 +2530,14 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         p = Path(doc["path"])
         if not p.exists() or not p.is_file():
             raise HTTPException(status_code=404, detail="File not found")
+        _audit(
+            user_id,
+            "file.open",
+            target_type="document",
+            target_id=document_id,
+            detail={"path": doc["path"], "filename": doc["filename"]},
+            request=request,
+        )
         return FileResponse(p)
 
     return app
