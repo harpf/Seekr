@@ -928,3 +928,77 @@ class SqliteStore:
                 removed += 1
         self.conn.commit()
         return removed
+
+    def _group_documents_by(self, column: str, extra_where: str = "") -> list[dict]:
+        """Return duplicate groups for the given documents column.
+
+        `column` is a trusted literal (only ever 'sha256' or 'content_hash' from
+        this module — never user input). Groups have COUNT(*) > 1.
+        """
+        assert column in ("sha256", "content_hash")  # guard against injection
+        where = f"WHERE {column} IS NOT NULL"
+        if extra_where:
+            where += f" AND {extra_where}"
+        hash_rows = self.conn.execute(
+            f"""
+            SELECT {column} AS h, COUNT(*) AS cnt
+            FROM documents
+            {where}
+            GROUP BY {column}
+            HAVING COUNT(*) > 1
+            ORDER BY cnt DESC, {column}
+            """
+        ).fetchall()
+        groups: list[dict] = []
+        for hr in hash_rows:
+            members = self.conn.execute(
+                f"""
+                SELECT id, path, filename, extension, file_size, modified_at, indexed_at,
+                       sha256, content_hash
+                FROM documents
+                WHERE {column} = ?
+                ORDER BY indexed_at ASC, id ASC
+                """,
+                (hr["h"],),
+            ).fetchall()
+            groups.append({
+                "hash": hr["h"],
+                "count": hr["cnt"],
+                "documents": [dict(m) for m in members],
+            })
+        return groups
+
+    def find_exact_duplicate_groups(self) -> list[dict]:
+        """Groups of documents that share an identical raw-bytes sha256."""
+        return self._group_documents_by("sha256")
+
+    def find_content_duplicate_groups(self) -> list[dict]:
+        """Groups of documents that share a normalized content_hash but are NOT
+        byte-identical (those are already covered by the exact-sha256 groups)."""
+        # Exclude content_hash values whose every member shares one sha256 — those
+        # are pure exact duplicates and surface in find_exact_duplicate_groups().
+        groups = self._group_documents_by("content_hash")
+        result = []
+        for g in groups:
+            distinct_sha = {d["sha256"] for d in g["documents"]}
+            if len(distinct_sha) > 1:
+                result.append(g)
+        return result
+
+    def delete_documents(self, document_ids: list[int]) -> int:
+        """Delete documents and their index rows. Mirrors remove_missing's
+        deletion order. FK cascades drop document_acl/document_tags/marks.
+        Returns the number of documents deleted."""
+        deleted = 0
+        for doc_id in document_ids:
+            row = self.conn.execute(
+                "SELECT id FROM documents WHERE id=?", (doc_id,)
+            ).fetchone()
+            if not row:
+                continue
+            self.conn.execute("DELETE FROM content_blocks WHERE document_id = ?", (doc_id,))
+            self.conn.execute("DELETE FROM content_fts WHERE document_id = ?", (doc_id,))
+            self.conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+            deleted += 1
+        self.conn.commit()
+        return deleted

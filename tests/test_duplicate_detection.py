@@ -148,3 +148,74 @@ def test_upsert_document_sets_content_hash(tmp_path):
         "SELECT content_hash FROM documents WHERE id=?", (doc_id,)
     ).fetchone()
     assert row["content_hash"] == normalized_content_hash("Hello   Body  TEXT")
+
+
+def test_find_exact_duplicate_groups(store):
+    a = _insert_doc(store, "/d/a.pdf", "SHARED")
+    b = _insert_doc(store, "/d/b.pdf", "SHARED")
+    _insert_doc(store, "/d/c.pdf", "UNIQUE")
+
+    groups = store.find_exact_duplicate_groups()
+    assert len(groups) == 1
+    g = groups[0]
+    assert g["hash"] == "SHARED"
+    assert g["count"] == 2
+    ids = {d["id"] for d in g["documents"]}
+    assert ids == {a, b}
+    # Each member exposes path/filename for the UI
+    assert all("path" in d and "filename" in d for d in g["documents"])
+
+
+def test_find_exact_duplicate_groups_empty_when_no_dupes(store):
+    _insert_doc(store, "/d/a.pdf", "H1")
+    _insert_doc(store, "/d/b.pdf", "H2")
+    assert store.find_exact_duplicate_groups() == []
+
+
+def test_find_content_duplicate_groups(store):
+    a = _insert_doc(store, "/d/a.pdf", "BYTES-A", content_hash="CONTENT")
+    b = _insert_doc(store, "/d/b.pdf", "BYTES-B", content_hash="CONTENT")
+    _insert_doc(store, "/d/c.pdf", "BYTES-C", content_hash="OTHER")
+
+    groups = store.find_content_duplicate_groups()
+    assert len(groups) == 1
+    g = groups[0]
+    assert g["hash"] == "CONTENT"
+    assert {d["id"] for d in g["documents"]} == {a, b}
+
+
+def test_find_content_duplicate_groups_ignores_null_hash(store):
+    _insert_doc(store, "/d/a.pdf", "S1", content_hash=None)
+    _insert_doc(store, "/d/b.pdf", "S2", content_hash=None)
+    # Two NULL content hashes must NOT be grouped together.
+    assert store.find_content_duplicate_groups() == []
+
+
+def test_find_content_duplicate_groups_excludes_exact_sha256_dupes(store):
+    # If two docs are already byte-identical (same sha256) we don't want them
+    # surfaced a second time as a content-duplicate.
+    _insert_doc(store, "/d/a.pdf", "SAME", content_hash="C")
+    _insert_doc(store, "/d/b.pdf", "SAME", content_hash="C")
+    # Same content_hash but ALSO same sha256 -> belongs to the exact group only.
+    assert store.find_content_duplicate_groups() == []
+
+
+def test_delete_documents_removes_index_rows(store):
+    a = _insert_doc(store, "/d/a.pdf", "H")
+    _insert_block(store, a, "some text")
+    store.conn.execute(
+        "INSERT INTO content_fts(document_id, block_id, path, filename, extension, "
+        "block_type, block_number, text) VALUES(?,?,?,?,?,?,?,?)",
+        (a, 1, "/d/a.pdf", "a.pdf", ".pdf", "paragraph", "1", "some text"),
+    )
+    store.conn.commit()
+
+    n = store.delete_documents([a])
+    assert n == 1
+    assert store.conn.execute("SELECT COUNT(*) FROM documents WHERE id=?", (a,)).fetchone()[0] == 0
+    assert store.conn.execute("SELECT COUNT(*) FROM content_blocks WHERE document_id=?", (a,)).fetchone()[0] == 0
+    assert store.conn.execute("SELECT COUNT(*) FROM content_fts WHERE document_id=?", (a,)).fetchone()[0] == 0
+
+
+def test_delete_documents_empty_list_is_noop(store):
+    assert store.delete_documents([]) == 0
