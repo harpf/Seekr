@@ -168,6 +168,7 @@ class SearchRequest(BaseModel):
     block_type: str | None = None
     modified_from: str | None = None
     modified_to: str | None = None
+    mode: str = "keyword"
 
 
 
@@ -333,6 +334,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     jobs: dict[str, JobState] = {}
     upload_root = Path(os.getenv("DOCUMENT_SEARCH_UPLOAD_ROOT", "/documents/uploads"))
     organizer = AiOrganizer()
+    from document_search.services.embedding_service import EmbeddingService
+    embedder = EmbeddingService()
 
     # Persistent job queue
     from document_search.services.job_store import JobStore
@@ -496,6 +499,26 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                     "error": last.get("error", "pull failed")}
         return {"ok": True, "model": last.get("model") or model or organizer.model,
                 "status": last.get("status", "success")}
+
+    @worker.handler("embed_index")
+    def _handle_embed_index(payload: dict, progress_cb):
+        cfg = load_config(config_path) if config_path.exists() else AppConfig()
+        if not cfg.semantic_search_enabled:
+            return {"skipped": True, "reason": "semantic_search_enabled is false", "embedded": 0}
+        embedder.model = cfg.embed_model
+        batch = int(payload.get("batch", 500))
+        db = SqliteStore(Path(db_path))
+        pending = db.get_blocks_without_embedding(limit=batch)
+        total = len(pending)
+        embedded = 0
+        progress_cb({"total": total, "embedded": 0})
+        for b in pending:
+            vec = embedder.embed(b["text"])
+            if vec:
+                db.upsert_block_embedding(b["block_id"], b["document_id"], vec, model=cfg.embed_model)
+                embedded += 1
+            progress_cb({"total": total, "embedded": embedded})
+        return {"skipped": False, "embedded": embedded, "total": total}
 
     def store() -> SqliteStore:
         """Return a per-thread SqliteStore, creating it once on first use."""
@@ -1008,6 +1031,14 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         )
         return {"job_id": str(job_id)}
 
+    @app.post("/api/index/embeddings/start")
+    def api_index_embeddings_start(x_auth_token: str | None = Header(default=None)):
+        admin_id = require_admin(x_auth_token)
+        job_id = job_store.enqueue(
+            "embed_index", payload={"batch": 500}, owner_user_id=admin_id, max_retries=0
+        )
+        return {"job_id": str(job_id)}
+
     @app.get("/api/index/jobs/{job_id}")
     def api_index_job(job_id: str, x_auth_token: str | None = Header(default=None)):
         user_id = require_user(x_auth_token)
@@ -1016,7 +1047,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         except ValueError:
             raise HTTPException(status_code=404, detail="Job not found")
         job = job_store.get(jid)
-        if not job or job["kind"] != "index_paths":
+        if not job or job["kind"] not in ("index_paths", "embed_index"):
             raise HTTPException(status_code=404, detail="Job not found")
         # ACL: owner or admin
         user_row = store().get_user_by_id(user_id)
@@ -2061,8 +2092,13 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         db = store()
         limit = max(1, min(req.limit, 100))
         offset = max(0, req.offset)
+        cfg = load_effective_config()
+        mode = req.mode if cfg.semantic_search_enabled else "keyword"
+        embed_fn = embedder.embed if (cfg.semantic_search_enabled and mode != "keyword") else None
+        if cfg.semantic_search_enabled and mode != "keyword":
+            embedder.model = cfg.embed_model
         try:
-            rows = search(db, req.query, limit, offset, req.filetype, req.path, req.block_type, req.modified_from, req.modified_to, req.tags, user_id)
+            rows = search(db, req.query, limit, offset, req.filetype, req.path, req.block_type, req.modified_from, req.modified_to, req.tags, user_id, mode=mode, embed_fn=embed_fn, bm25_weight=cfg.bm25_weight, vector_weight=cfg.vector_weight)
             total = count_documents(db, req.query, req.filetype, req.path, req.block_type, req.modified_from, req.modified_to, req.tags, user_id)
         except FtsQueryError:
             raise HTTPException(400, "Could not parse your search query. Check quotes and operators.")

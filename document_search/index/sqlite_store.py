@@ -16,6 +16,8 @@ class SqliteStore:
         self.conn.row_factory = sqlite3.Row
         self._configure_connection()
         self._init_schema()
+        self.embed_fn = None  # optional Callable[[str], list[float] | None]; set by app when semantic enabled
+        self.embed_model = "unknown"
 
     def _configure_connection(self) -> None:
         self.conn.execute("PRAGMA journal_mode=WAL")
@@ -510,17 +512,24 @@ class SqliteStore:
         name_str = fp.path.name
         ext_str = fp.path.suffix.lower()
         fts_rows = []
+        new_blocks: list[tuple[int, str]] = []
         for block in ext.blocks:
             cursor = self.conn.execute(
                 "INSERT INTO content_blocks(document_id, block_type, block_number, text, extractor, text_length, metadata_json) VALUES(?,?,?,?,?,?,?)",
                 (doc_id, block.block_type, block.block_number, block.text, block.extractor, len(block.text), str(block.metadata)),
             )
             fts_rows.append((doc_id, cursor.lastrowid, path_str, name_str, ext_str, block.block_type, str(block.block_number), block.text))
+            new_blocks.append((cursor.lastrowid, block.text))
         if fts_rows:
             self.conn.executemany(
                 "INSERT INTO content_fts(document_id, block_id, path, filename, extension, block_type, block_number, text) VALUES(?,?,?,?,?,?,?,?)",
                 fts_rows,
             )
+        if self.embed_fn is not None:
+            for _block_id, _text in new_blocks:
+                vec = self.embed_fn(_text)
+                if vec:
+                    self.upsert_block_embedding(_block_id, doc_id, vec, model=self.embed_model)
         self.conn.commit()
         return doc_id
 
