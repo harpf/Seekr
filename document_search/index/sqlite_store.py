@@ -170,6 +170,26 @@ class SqliteStore:
               FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_block_emb_doc ON block_embeddings(document_id);
+            CREATE TABLE IF NOT EXISTS search_history (
+              id INTEGER PRIMARY KEY,
+              user_id INTEGER NOT NULL,
+              query TEXT NOT NULL,
+              filters_json TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL,
+              FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS saved_searches (
+              id INTEGER PRIMARY KEY,
+              user_id INTEGER NOT NULL,
+              name TEXT NOT NULL,
+              query TEXT NOT NULL,
+              filters_json TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL,
+              UNIQUE(user_id, name),
+              FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_search_history_user ON search_history(user_id, id);
+            CREATE INDEX IF NOT EXISTS idx_saved_searches_user ON saved_searches(user_id, id);
             """
         )
         # Migration: add role column for existing databases
