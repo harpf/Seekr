@@ -1374,6 +1374,45 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             raise HTTPException(status_code=400, detail=str(e))
         return {"status": "removed"}
 
+    # ── Document ACLs ──────────────────────────────────────────────────
+
+    @app.get("/api/acl/documents/{document_id}")
+    def api_list_document_acl(document_id: int, x_auth_token: str | None = Header(default=None)):
+        user_id = require_user(x_auth_token)
+        db = store()
+        doc = db.get_document_by_id(document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        # Admin OR document owner may inspect the ACL.
+        is_admin = (db.get_user_by_id(user_id) or {})["role"] == "admin"
+        if not is_admin:
+            owner_pid = doc["owner_principal_id"] if "owner_principal_id" in doc.keys() else None
+            user_pid = db.conn.execute(
+                "SELECT principal_id FROM users WHERE id=?", (user_id,)
+            ).fetchone()
+            user_pid = user_pid["principal_id"] if user_pid else None
+            if owner_pid is None or owner_pid != user_pid:
+                raise HTTPException(status_code=403, detail="Not allowed")
+        return db.list_document_acl(document_id)
+
+    @app.post("/api/acl/grant")
+    def api_acl_grant(req: GrantRequest, x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        try:
+            store().grant(req.document_id, req.principal_id, req.permission)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {"status": "granted"}
+
+    @app.post("/api/acl/revoke")
+    def api_acl_revoke(req: GrantRequest, x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        try:
+            store().revoke(req.document_id, req.principal_id, req.permission)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {"status": "revoked"}
+
     # ── Path test & network mount ──────────────────────────────────────
 
     @app.post("/api/paths/test")
