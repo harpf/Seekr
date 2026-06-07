@@ -108,3 +108,43 @@ def test_backfill_is_idempotent_and_does_not_overwrite(store):
         "SELECT content_hash FROM documents WHERE id=?", (doc_id,)
     ).fetchone()
     assert row["content_hash"] == "preexisting"
+
+
+def test_upsert_document_sets_content_hash(tmp_path):
+    from datetime import UTC, datetime
+
+    from document_search.models import (
+        ContentBlock,
+        ExtractionResult,
+        FileFingerprint,
+    )
+    from document_search.services.file_service import normalized_content_hash
+
+    store = SqliteStore(tmp_path / "test.db")
+    p = tmp_path / "report.txt"
+    p.write_text("hello body text", encoding="utf-8")
+    fp = FileFingerprint(
+        path=p,
+        file_size=15,
+        modified_at=datetime.now(tz=UTC),
+        sha256="abc123",
+    )
+    block = ContentBlock(
+        block_type="paragraph",
+        block_number=1,
+        text="Hello   Body  TEXT",
+        extractor="txt",
+        metadata={},
+    )
+    result = ExtractionResult(
+        file_path=p,
+        status="ok",
+        document_metadata={},
+        blocks=[block],
+        error_message=None,
+    )
+    doc_id = store.upsert_document(fp, result)
+    row = store.conn.execute(
+        "SELECT content_hash FROM documents WHERE id=?", (doc_id,)
+    ).fetchone()
+    assert row["content_hash"] == normalized_content_hash("Hello   Body  TEXT")
