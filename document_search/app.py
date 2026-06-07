@@ -706,6 +706,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         db = store()
         if not db.get_document_by_id(req.document_id):
             raise HTTPException(status_code=404, detail="Document not found")
+        if not db.user_can_read_document(user_id, req.document_id):
+            raise HTTPException(status_code=403, detail="Not permitted to read this document")
         db.set_mark(user_id, req.document_id, req.is_marked)
         return {"status": "ok"}
 
@@ -715,6 +717,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         db = store()
         if not db.get_document_by_id(req.document_id):
             raise HTTPException(status_code=404, detail="Document not found")
+        if not db.user_can_read_document(user_id, req.document_id):
+            raise HTTPException(status_code=403, detail="Not permitted to read this document")
         db.set_tags(user_id, req.document_id, req.tags)
         return {"status": "ok"}
 
@@ -1811,11 +1815,13 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     @app.get("/api/files/open")
     def api_files_open(document_id: int, x_auth_token: str | None = Header(default=None)):
-        require_user(x_auth_token)
+        user_id = require_user(x_auth_token)
         db = store()
         doc = db.get_document_by_id(document_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
+        if not db.user_can_read_document(user_id, document_id):
+            raise HTTPException(status_code=403, detail="Not permitted to read this document")
         p = Path(doc["path"])
         if not p.exists() or not p.is_file():
             raise HTTPException(status_code=404, detail="File not found")

@@ -275,3 +275,41 @@ def test_status_count_is_acl_filtered(app_client):
     bob_status = client.get("/api/status", headers=bob).json()
     assert admin_status["documents"] == 1
     assert bob_status["documents"] == 0
+
+
+def test_files_open_forbidden_for_non_reader(app_client):
+    client, tmp_path = app_client
+    admin = _admin_headers(client)
+    bob = _make_second_user(client, admin)
+    doc_id = _seed_private_doc_for_admin(client, tmp_path)
+
+    r_admin = client.get(f"/api/files/open?document_id={doc_id}", headers=admin)
+    assert r_admin.status_code == 200, r_admin.text
+    r_bob = client.get(f"/api/files/open?document_id={doc_id}", headers=bob)
+    assert r_bob.status_code == 403
+
+
+def test_mark_forbidden_for_non_reader(app_client):
+    client, tmp_path = app_client
+    admin = _admin_headers(client)
+    bob = _make_second_user(client, admin)
+    doc_id = _seed_private_doc_for_admin(client, tmp_path)
+    r = client.post(
+        "/api/documents/mark",
+        json={"document_id": doc_id, "is_marked": True},
+        headers=bob,
+    )
+    assert r.status_code == 403
+
+
+def test_tags_forbidden_for_non_reader(app_client):
+    client, tmp_path = app_client
+    admin = _admin_headers(client)
+    bob = _make_second_user(client, admin)
+    doc_id = _seed_private_doc_for_admin(client, tmp_path)
+    r = client.post(
+        "/api/documents/tags",
+        json={"document_id": doc_id, "tags": ["x"]},
+        headers=bob,
+    )
+    assert r.status_code == 403
