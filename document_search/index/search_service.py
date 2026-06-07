@@ -30,6 +30,65 @@ def build_match_query(
     return " AND ".join(clauses)
 
 
+def _rrf_fuse(
+    lists: dict[str, tuple[list[int], float]],
+    k: int = 60,
+) -> list[tuple[int, float]]:
+    """Reciprocal Rank Fusion of several ranked document_id lists.
+
+    `lists` maps a label -> (ranked_doc_ids, weight). Each document's fused
+    score is the weighted sum over lists of 1/(k + rank), where rank is the
+    1-based position in that list. Documents absent from a list contribute 0
+    from it. Returns (document_id, score) sorted by score descending, ties
+    broken by document_id for determinism.
+    """
+    scores: dict[int, float] = {}
+    for ranked, weight in lists.values():
+        for idx, doc_id in enumerate(ranked):
+            rank = idx + 1
+            scores[doc_id] = scores.get(doc_id, 0.0) + weight * (1.0 / (k + rank))
+    return sorted(scores.items(), key=lambda t: (-t[1], t[0]))
+
+
+def _recency_boost(modified_at: str | None, now_iso: str | None = None) -> float:
+    """Map a document's modified_at into a [0, 1] recency score.
+
+    1.0 == modified now, decaying with a ~365-day half-life. Unparseable or
+    missing dates score 0.0 (no boost, never an error).
+    """
+    from datetime import UTC, datetime
+    if not modified_at:
+        return 0.0
+    try:
+        ts = datetime.fromisoformat(modified_at)
+    except (ValueError, TypeError):
+        return 0.0
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    now = datetime.fromisoformat(now_iso) if now_iso else datetime.now(tz=UTC)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    age_days = max(0.0, (now - ts).total_seconds() / 86400.0)
+    # Exponential decay, half-life 365 days.
+    return 0.5 ** (age_days / 365.0)
+
+
+def _field_boost(query: str, filename: str) -> float:
+    """Boost for query terms appearing in the filename/title.
+
+    Returns the fraction of distinct query terms present in the filename, in
+    [0, 1]. A filename match is a strong relevance signal that BM25 over body
+    text under-weights.
+    """
+    import re
+    terms = {t for t in re.findall(r"[a-z0-9]+", (query or "").lower()) if len(t) > 2}
+    if not terms:
+        return 0.0
+    name = (filename or "").lower()
+    hits = sum(1 for t in terms if t in name)
+    return hits / len(terms)
+
+
 def _browse_all(
     store: SqliteStore,
     filetype: str | None,
