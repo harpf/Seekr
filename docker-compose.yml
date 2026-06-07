@@ -2,6 +2,15 @@ services:
   document-search:
     build: .
     container_name: document-search
+    # Run as the unprivileged seekr uid:gid baked into the image (see Dockerfile).
+    # NOTE: the host ./data directory must be writable by uid 10001
+    # (e.g. `sudo chown -R 10001:10001 ./data`).
+    user: "10001:10001"
+    # ── Optional elevated capability for in-app SMB/NFS mounting ────────
+    # Only needed if you use the in-app SMB/NFS mount feature (the app issues
+    # mount(8) syscalls). Uncomment to opt in; leave disabled otherwise.
+    # cap_add:
+    #   - SYS_ADMIN
     environment:
       DOCUMENT_SEARCH_DB: /data/document_index.db
       DOCUMENT_SEARCH_CONFIG_PATH: /data/config.json
