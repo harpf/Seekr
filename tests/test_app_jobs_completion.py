@@ -217,3 +217,52 @@ def test_re_enqueue_endpoint(tmp_path):
         new_id = int(r.json()["job_id"])
         assert new_id != src
         assert app.state.job_store.get(new_id)["state"] in ("pending", "running", "succeeded")
+
+
+def test_cancel_pending_job_via_api_is_immediate(tmp_path):
+    """A pending job (worker stopped) cancelled via the API goes straight to
+    cancelled and never runs its handler."""
+    app = create_app(str(tmp_path / "t.db"))
+    ran = []
+
+    @app.state.worker.handler("never")
+    def _never(payload, progress_cb):
+        ran.append(payload)
+        return {}
+
+    with TestClient(app) as client:
+        token = _login(client)
+        app.state.worker.stop()
+        jid = app.state.job_store.enqueue("never", {"x": 1}, owner_user_id=1)
+        r = client.post(f"/api/jobs/{jid}/cancel", headers={"X-Auth-Token": token})
+        assert r.status_code == 200
+        assert r.json()["outcome"] == "cancelled"
+        assert app.state.job_store.get(jid)["state"] == "cancelled"
+        app.state.worker.start()
+        time.sleep(0.3)
+        assert ran == []
+
+
+def test_re_enqueue_then_runs(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+    done = []
+
+    @app.state.worker.handler("rerun")
+    def _rerun(payload, progress_cb):
+        done.append(payload)
+        return {"ok": True}
+
+    with TestClient(app) as client:
+        token = _login(client)
+        src = app.state.job_store.enqueue("rerun", {"n": 1}, owner_user_id=1)
+        app.state.job_store.conn.execute("UPDATE jobs SET state='interrupted' WHERE id=?", (src,))
+        app.state.job_store.conn.commit()
+        r = client.post(f"/api/jobs/{src}/re-enqueue", headers={"X-Auth-Token": token})
+        new_id = int(r.json()["job_id"])
+        deadline = time.monotonic() + 4
+        while time.monotonic() < deadline:
+            if app.state.job_store.get(new_id)["state"] == "succeeded":
+                break
+            time.sleep(0.03)
+        assert app.state.job_store.get(new_id)["state"] == "succeeded"
+        assert done == [{"n": 1}]
