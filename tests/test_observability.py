@@ -156,3 +156,80 @@ def test_metrics_token_gate_when_env_set(tmp_path, monkeypatch):
         # Correct token -> 200.
         ok = client.get("/metrics", headers={"Authorization": "Bearer s3cr3t"})
         assert ok.status_code == 200, ok.text
+
+
+import time  # noqa: E402
+
+
+def _login(client, username="admin", password="admin"):
+    r = client.post("/api/login", json={"username": username, "password": password})
+    assert r.status_code == 200, r.text
+    return r.json()["token"]
+
+
+def test_index_throughput_counter_increments(tmp_path):
+    from document_search import observability as _obs
+
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = _login(client)
+        empty = tmp_path / "empty"
+        empty.mkdir()
+
+        before = _obs.JOBS_TOTAL.labels(
+            kind="index_paths", outcome="succeeded"
+        )._value.get()
+
+        start = client.post(
+            "/api/index/start",
+            headers={"X-Auth-Token": token},
+            json={"paths": [str(empty)]},
+        )
+        assert start.status_code == 200, start.text
+        job_id = start.json()["job_id"]
+
+        # Wait for the empty-dir job to finish.
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            r = client.get(
+                f"/api/index/jobs/{job_id}", headers={"X-Auth-Token": token}
+            )
+            assert r.status_code == 200, r.text
+            if r.json()["status"] in ("finished", "failed", "interrupted"):
+                break
+            time.sleep(0.02)
+
+        after = _obs.JOBS_TOTAL.labels(
+            kind="index_paths", outcome="succeeded"
+        )._value.get()
+        assert after == before + 1
+
+
+def test_job_failure_counter_increments(tmp_path):
+    from document_search import observability as _obs
+
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app):
+        # Register an ad-hoc handler that always raises so the job fails.
+        @app.state.worker.handler("metrics_boom")
+        def _boom(payload, progress_cb):
+            raise RuntimeError("boom")
+
+        before = _obs.JOBS_TOTAL.labels(
+            kind="metrics_boom", outcome="failed"
+        )._value.get()
+
+        app.state.job_store.enqueue("metrics_boom", {}, max_retries=0)
+
+        # Wait for the job to reach the terminal failed state.
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            jobs = app.state.job_store.list_jobs(kind="metrics_boom", limit=1)
+            if jobs and jobs[0]["state"] == "failed":
+                break
+            time.sleep(0.02)
+
+        after = _obs.JOBS_TOTAL.labels(
+            kind="metrics_boom", outcome="failed"
+        )._value.get()
+        assert after == before + 1

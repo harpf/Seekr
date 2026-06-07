@@ -358,6 +358,25 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     app.state.job_store = job_store
     app.state.worker = worker
 
+    _orig_handler = worker.handler
+
+    def _counting_handler(kind: str):
+        decorator = _orig_handler(kind)
+
+        def wrap(fn):
+            def counted(payload, progress_cb):
+                try:
+                    result = fn(payload, progress_cb)
+                except Exception:
+                    _obs.JOBS_TOTAL.labels(kind=kind, outcome="failed").inc()
+                    raise
+                _obs.JOBS_TOTAL.labels(kind=kind, outcome="succeeded").inc()
+                return result
+            return decorator(counted)
+        return wrap
+
+    worker.handler = _counting_handler  # type: ignore[method-assign]
+
     def _scheduled_paths() -> list[str]:
         try:
             raw = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
@@ -418,21 +437,26 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             if existing and existing["sha256"] == fp.sha256 and existing["modified_at"] == fp.modified_at.isoformat():
                 counts["skipped"] += 1
                 counts["done"] += 1
+                _obs.INDEX_DOCS_TOTAL.labels(outcome="skipped").inc()
                 progress_cb(dict(counts))
                 continue
             extr = extractor_for(path.suffix.lower())
             if extr is None:
                 counts["done"] += 1
+                _obs.INDEX_DOCS_TOTAL.labels(outcome="no_extractor").inc()
                 progress_cb(dict(counts))
                 continue
             result = extr.extract(path)
             db.upsert_document(fp, result, owner_principal_id=default_owner_pid)
             if result.status == "error":
                 counts["errors"] += 1
+                _obs.INDEX_DOCS_TOTAL.labels(outcome="error").inc()
             elif existing:
                 counts["updated"] += 1
+                _obs.INDEX_DOCS_TOTAL.labels(outcome="updated").inc()
             else:
                 counts["indexed"] += 1
+                _obs.INDEX_DOCS_TOTAL.labels(outcome="indexed").inc()
             counts["done"] += 1
             progress_cb(dict(counts))
         return counts
