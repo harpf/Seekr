@@ -407,6 +407,117 @@ class SqliteStore:
         )
         self.conn.commit()
 
+    def record_audit(
+        self,
+        actor_user_id: int | None,
+        action: str,
+        target_type: str | None = None,
+        target_id: str | int | None = None,
+        detail: dict | None = None,
+        ip: str | None = None,
+    ) -> int:
+        """Insert one audit row. Best-effort: callers wrap this so a logging
+        failure never breaks the audited operation.
+
+        `target_id` is coerced to TEXT (some targets are non-integer); `detail`
+        is JSON-encoded. Returns the new row id.
+        """
+        now = datetime.now(tz=UTC).isoformat()
+        cur = self.conn.execute(
+            "INSERT INTO audit_log(actor_user_id, action, target_type, target_id, "
+            "detail_json, ip, created_at) VALUES(?,?,?,?,?,?,?)",
+            (
+                actor_user_id,
+                action,
+                target_type,
+                None if target_id is None else str(target_id),
+                json.dumps(detail) if detail is not None else None,
+                ip,
+                now,
+            ),
+        )
+        self.conn.commit()
+        return int(cur.lastrowid)
+
+    def list_audit(
+        self,
+        actor_user_id: int | None = None,
+        action: str | None = None,
+        target_type: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Return audit rows newest-first, with optional filters and pagination.
+
+        Each returned dict includes a decoded `detail` key (the parsed
+        `detail_json`, or `None`) plus the joined `actor_username` for display.
+        """
+        clauses: list[str] = []
+        params: list = []
+        if actor_user_id is not None:
+            clauses.append("a.actor_user_id = ?")
+            params.append(actor_user_id)
+        if action:
+            clauses.append("a.action = ?")
+            params.append(action)
+        if target_type:
+            clauses.append("a.target_type = ?")
+            params.append(target_type)
+        if date_from:
+            clauses.append("a.created_at >= ?")
+            params.append(date_from)
+        if date_to:
+            clauses.append("a.created_at <= ?")
+            params.append(date_to)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        sql = (
+            "SELECT a.id, a.actor_user_id, u.username AS actor_username, a.action, "
+            "a.target_type, a.target_id, a.detail_json, a.ip, a.created_at "
+            "FROM audit_log a LEFT JOIN users u ON u.id = a.actor_user_id "
+            f"{where} ORDER BY a.id DESC LIMIT ? OFFSET ?"
+        )
+        params.extend([limit, offset])
+        rows = self.conn.execute(sql, tuple(params)).fetchall()
+        out: list[dict] = []
+        for r in rows:
+            d = dict(r)
+            d["detail"] = json.loads(d["detail_json"]) if d["detail_json"] else None
+            out.append(d)
+        return out
+
+    def count_audit(
+        self,
+        actor_user_id: int | None = None,
+        action: str | None = None,
+        target_type: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> int:
+        """Count audit rows matching the same filters as `list_audit` (used for
+        pagination totals)."""
+        clauses: list[str] = []
+        params: list = []
+        if actor_user_id is not None:
+            clauses.append("actor_user_id = ?")
+            params.append(actor_user_id)
+        if action:
+            clauses.append("action = ?")
+            params.append(action)
+        if target_type:
+            clauses.append("target_type = ?")
+            params.append(target_type)
+        if date_from:
+            clauses.append("created_at >= ?")
+            params.append(date_from)
+        if date_to:
+            clauses.append("created_at <= ?")
+            params.append(date_to)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        sql = f"SELECT COUNT(*) FROM audit_log {where}"
+        return int(self.conn.execute(sql, tuple(params)).fetchone()[0])
+
     def _backfill_content_hash(self) -> None:
         """Idempotent: compute content_hash for any document that has indexed text
         but no content_hash yet. Safe to run on every startup. Documents without
