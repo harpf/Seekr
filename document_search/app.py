@@ -1005,6 +1005,74 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             "done":    int(progress.get("done", 0)),
         }
 
+    def _job_acl_or_404(job_id_str: str, user_id: int) -> dict:
+        """Resolve a persistent job by string id, enforcing owner-or-admin access.
+        Raises 404 for missing/foreign jobs (no information leak)."""
+        if not job_id_str.isdigit():
+            raise HTTPException(status_code=404, detail="Job not found")
+        job = job_store.get(int(job_id_str))
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        user_row = store().get_user_by_id(user_id)
+        is_admin = bool(user_row) and user_row["role"] == "admin"
+        if not is_admin and job["owner_user_id"] != user_id:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return job
+
+    @app.get("/api/jobs")
+    def api_list_jobs(
+        state: str | None = None,
+        kind: str | None = None,
+        limit: int = 100,
+        x_auth_token: str | None = Header(default=None),
+    ):
+        user_id = require_user(x_auth_token)
+        user_row = store().get_user_by_id(user_id)
+        is_admin = bool(user_row) and user_row["role"] == "admin"
+        owner = None if is_admin else user_id
+        rows = job_store.list_jobs(
+            owner_user_id=owner, state=state, kind=kind, limit=min(limit, 500)
+        )
+        out = []
+        for r in rows:
+            progress = json.loads(r["progress_json"]) if r["progress_json"] else {}
+            out.append({
+                "id": r["id"],
+                "kind": r["kind"],
+                "state": r["state"],
+                "retry_count": r["retry_count"],
+                "max_retries": r["max_retries"],
+                "cancel_requested": bool(r["cancel_requested"]),
+                "owner_user_id": r["owner_user_id"],
+                "created_at": r["created_at"],
+                "started_at": r["started_at"],
+                "finished_at": r["finished_at"],
+                "error_message": r["error_message"],
+                "progress": progress,
+            })
+        return out
+
+    @app.post("/api/jobs/{job_id}/cancel")
+    def api_cancel_job(job_id: str, x_auth_token: str | None = Header(default=None)):
+        user_id = require_user(x_auth_token)
+        _job_acl_or_404(job_id, user_id)
+        outcome = job_store.request_cancel(int(job_id))
+        if outcome == "not_found":
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {"job_id": job_id, "outcome": outcome}
+
+    @app.post("/api/jobs/{job_id}/re-enqueue")
+    def api_re_enqueue_job(job_id: str, x_auth_token: str | None = Header(default=None)):
+        user_id = require_user(x_auth_token)
+        _job_acl_or_404(job_id, user_id)
+        new_id = job_store.re_enqueue(int(job_id))
+        if new_id is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Job cannot be re-enqueued (must be interrupted, failed, or cancelled)",
+            )
+        return {"job_id": str(new_id)}
+
     @app.get("/api/index/extensions")
     def api_index_extensions(x_auth_token: str | None = Header(default=None)):
         require_user(x_auth_token)

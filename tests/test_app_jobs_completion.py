@@ -112,3 +112,108 @@ def test_update_run_persists_job_row(tmp_path, monkeypatch):
         rows = js.list_jobs(kind="system_update")
         assert len(rows) == 1
         assert rows[0]["state"] == "succeeded"
+
+
+def _create_user(client, admin_token, username, password="pw123456", role="user"):
+    r = client.post(
+        "/api/users",
+        headers={"X-Auth-Token": admin_token},
+        json={"username": username, "password": password, "role": role},
+    )
+    assert r.status_code in (200, 201), r.text
+
+
+def test_list_jobs_owner_scoped_and_admin_sees_all(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+
+    @app.state.worker.handler("demo_block")
+    def _block(payload, progress_cb):
+        import time as _t
+        _t.sleep(2.0)
+        return {}
+
+    with TestClient(app) as client:
+        admin_token = _login(client)
+        _create_user(client, admin_token, "bob")
+        bob_token = client.post("/api/login", json={"username": "bob", "password": "pw123456"}).json()["token"]
+
+        admin_job = app.state.job_store.enqueue("demo_block", {}, owner_user_id=1)
+        users = client.get("/api/users", headers={"X-Auth-Token": admin_token}).json()
+        bob_uid = next(u["id"] for u in users if u["username"] == "bob")
+        bob_job = app.state.job_store.enqueue("demo_block", {}, owner_user_id=bob_uid)
+
+        r = client.get("/api/jobs", headers={"X-Auth-Token": bob_token})
+        assert r.status_code == 200, r.text
+        ids = {j["id"] for j in r.json()}
+        assert bob_job in ids
+        assert admin_job not in ids
+
+        r = client.get("/api/jobs", headers={"X-Auth-Token": admin_token})
+        ids = {j["id"] for j in r.json()}
+        assert {admin_job, bob_job}.issubset(ids)
+
+
+def test_cancel_job_endpoint_owner_and_admin(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+
+    @app.state.worker.handler("loopy")
+    def _loopy(payload, progress_cb):
+        import time as _t
+        jid = payload["job_id"]
+        for _ in range(1000):
+            if app.state.worker.is_cancelled(jid):
+                from document_search.services.job_worker import JobCancelled
+                raise JobCancelled()
+            progress_cb({"tick": 1})
+            _t.sleep(0.01)
+        return {}
+
+    with TestClient(app) as client:
+        token = _login(client)
+        jid = app.state.job_store.enqueue("loopy", {}, owner_user_id=1)
+        app.state.job_store.conn.execute(
+            "UPDATE jobs SET payload_json=? WHERE id=?", (f'{{"job_id": {jid}}}', jid)
+        )
+        app.state.job_store.conn.commit()
+
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            if app.state.job_store.get(jid)["state"] == "running":
+                break
+            time.sleep(0.02)
+
+        r = client.post(f"/api/jobs/{jid}/cancel", headers={"X-Auth-Token": token})
+        assert r.status_code == 200, r.text
+        assert r.json()["outcome"] in ("requested", "cancelled")
+
+        deadline = time.monotonic() + 4
+        while time.monotonic() < deadline:
+            if app.state.job_store.get(jid)["state"] == "cancelled":
+                break
+            time.sleep(0.03)
+        assert app.state.job_store.get(jid)["state"] == "cancelled"
+
+
+def test_cancel_other_users_job_is_404_for_non_admin(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        admin_token = _login(client)
+        _create_user(client, admin_token, "carol")
+        carol_token = client.post("/api/login", json={"username": "carol", "password": "pw123456"}).json()["token"]
+        admin_job = app.state.job_store.enqueue("demo", {}, owner_user_id=1)
+        r = client.post(f"/api/jobs/{admin_job}/cancel", headers={"X-Auth-Token": carol_token})
+        assert r.status_code == 404
+
+
+def test_re_enqueue_endpoint(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = _login(client)
+        src = app.state.job_store.enqueue("index_paths", {"paths": ["/x"]}, owner_user_id=1)
+        app.state.job_store.conn.execute("UPDATE jobs SET state='interrupted' WHERE id=?", (src,))
+        app.state.job_store.conn.commit()
+        r = client.post(f"/api/jobs/{src}/re-enqueue", headers={"X-Auth-Token": token})
+        assert r.status_code == 200, r.text
+        new_id = int(r.json()["job_id"])
+        assert new_id != src
+        assert app.state.job_store.get(new_id)["state"] in ("pending", "running", "succeeded")
