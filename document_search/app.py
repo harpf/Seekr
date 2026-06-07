@@ -2144,7 +2144,30 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         response.headers["X-Has-More"] = "true" if has_more else "false"
         response.headers["X-Next-Offset"] = str(offset + limit) if has_more else str(offset)
         response.headers["Access-Control-Expose-Headers"] = "X-Total-Count, X-Has-More, X-Next-Offset"
+        db.record_search_history(
+            user_id,
+            req.query,
+            {
+                "filetype": req.filetype,
+                "path": req.path,
+                "block_type": req.block_type,
+                "modified_from": req.modified_from,
+                "modified_to": req.modified_to,
+                "tags": req.tags,
+            },
+        )
         return output
+
+    @app.get("/api/search/history")
+    def api_search_history(x_auth_token: str | None = Header(default=None)):
+        user_id = require_user(x_auth_token)
+        return store().list_search_history(user_id)
+
+    @app.delete("/api/search/history")
+    def api_clear_search_history(x_auth_token: str | None = Header(default=None)):
+        user_id = require_user(x_auth_token)
+        removed = store().clear_search_history(user_id)
+        return {"status": "ok", "removed": removed}
 
     @app.get("/api/status")
     def api_status(x_auth_token: str | None = Header(default=None)):
