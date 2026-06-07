@@ -6,6 +6,11 @@ import pytest
 from document_search.index.sqlite_store import SqliteStore
 from document_search.models import ContentBlock, ExtractionResult, FileFingerprint
 
+fastapi = pytest.importorskip("fastapi")
+from fastapi.testclient import TestClient  # noqa: E402
+
+from document_search.app import create_app  # noqa: E402
+
 
 def _fp(path: Path) -> FileFingerprint:
     return FileFingerprint(
@@ -129,3 +134,56 @@ def test_user_can_read_public_document(store, tmp_path):
 def test_user_can_read_missing_document_is_false(store):
     bob = store.create_user("bob", "pw")
     assert store.user_can_read_document(bob, 999999) is False
+
+
+@pytest.fixture
+def app_client(tmp_path, monkeypatch):
+    # Hermetic: uploads + db inside tmp_path. DOCUMENT_SEARCH_UPLOAD_ROOT is read at
+    # create_app() time, so set it before constructing the app.
+    monkeypatch.setenv("DOCUMENT_SEARCH_UPLOAD_ROOT", str(tmp_path / "uploads"))
+    monkeypatch.chdir(tmp_path)
+    # create_app mounts static/templates via relative paths resolved against cwd,
+    # so provide those directories inside the hermetic tmp_path.
+    (tmp_path / "document_search" / "web" / "static").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "document_search" / "web" / "templates").mkdir(parents=True, exist_ok=True)
+    app = create_app(str(tmp_path / "index.db"))
+    return TestClient(app), tmp_path
+
+
+def _admin_headers(client):
+    r = client.post("/api/login", json={"username": "admin", "password": "admin"})
+    return {"X-Auth-Token": r.json()["token"]}
+
+
+def _make_second_user(client, admin_headers, username="bob", password="bob-password"):
+    r = client.post(
+        "/api/users",
+        json={"username": username, "password": password, "role": "user"},
+        headers=admin_headers,
+    )
+    assert r.status_code in (200, 201), r.text
+    r = client.post("/api/login", json={"username": username, "password": password})
+    return {"X-Auth-Token": r.json()["token"]}
+
+
+def test_upload_sets_uploader_as_owner(app_client):
+    client, _ = app_client
+    admin = _admin_headers(client)
+    files = {"file": ("note.txt", b"hello upload owner test", "text/plain")}
+    r = client.post("/api/upload", files=files, headers=admin)
+    assert r.status_code == 200, r.text
+    doc_id = r.json()["document_id"]
+    assert doc_id is not None
+
+    import os
+    from pathlib import Path as _Path
+
+    from document_search.index.sqlite_store import SqliteStore
+    store = SqliteStore(_Path(os.path.join(os.getcwd(), "index.db")))
+    owner = store.conn.execute(
+        "SELECT owner_principal_id FROM documents WHERE id=?", (doc_id,)
+    ).fetchone()["owner_principal_id"]
+    admin_pid = store.conn.execute(
+        "SELECT principal_id FROM users WHERE username='admin'"
+    ).fetchone()["principal_id"]
+    assert owner == admin_pid

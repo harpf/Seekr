@@ -815,7 +815,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         )
 
         if result:
-            doc_id = db.upsert_document(fp, result)
+            owner_pid = db.get_user_principal_id(user_id)
+            doc_id = db.upsert_document(fp, result, owner_principal_id=owner_pid)
             if tag_list:
                 db.set_tags(user_id, doc_id, tag_list)
         else:
