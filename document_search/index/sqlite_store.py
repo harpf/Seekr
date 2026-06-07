@@ -157,6 +157,17 @@ class SqliteStore:
             CREATE INDEX IF NOT EXISTS idx_jobs_kind_state     ON jobs(kind, state);
             CREATE INDEX IF NOT EXISTS idx_jobs_next_attempt   ON jobs(state, next_attempt_at);
             CREATE INDEX IF NOT EXISTS idx_jobs_owner          ON jobs(owner_user_id);
+            CREATE TABLE IF NOT EXISTS block_embeddings (
+              block_id INTEGER PRIMARY KEY,
+              document_id INTEGER NOT NULL,
+              dim INTEGER NOT NULL,
+              vector BLOB NOT NULL,
+              model TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY (block_id) REFERENCES content_blocks(id) ON DELETE CASCADE,
+              FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_block_emb_doc ON block_embeddings(document_id);
             """
         )
         # Migration: add role column for existing databases
@@ -669,6 +680,55 @@ class SqliteStore:
                 (document_id, block["id"], new_path, new_p.name, new_p.suffix.lower(), block["block_type"], block["block_number"], block["text"]),
             )
         self.conn.commit()
+
+    def upsert_block_embedding(
+        self, block_id: int, document_id: int, vector: list[float], model: str
+    ) -> None:
+        from document_search.services.embedding_service import pack_vector
+        now = datetime.now(tz=UTC).isoformat()
+        self.conn.execute(
+            """
+            INSERT INTO block_embeddings(block_id, document_id, dim, vector, model, created_at)
+            VALUES(?,?,?,?,?,?)
+            ON CONFLICT(block_id) DO UPDATE SET
+              document_id=excluded.document_id, dim=excluded.dim,
+              vector=excluded.vector, model=excluded.model, created_at=excluded.created_at
+            """,
+            (block_id, document_id, len(vector), pack_vector(vector), model, now),
+        )
+        self.conn.commit()
+
+    def get_blocks_without_embedding(self, limit: int = 500) -> list[dict]:
+        rows = self.conn.execute(
+            """
+            SELECT cb.id AS block_id, cb.document_id AS document_id, cb.text AS text
+            FROM content_blocks cb
+            LEFT JOIN block_embeddings be ON be.block_id = cb.id
+            WHERE be.block_id IS NULL AND length(cb.text) > 0
+            ORDER BY cb.id
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def iter_block_embeddings(self, document_ids: list[int]):
+        """Yield (block_id, document_id, vector) for the given documents.
+
+        Decodes the packed BLOB lazily; intended for the in-memory cosine scan
+        over an ACL-filtered candidate set.
+        """
+        from document_search.services.embedding_service import unpack_vector
+        if not document_ids:
+            return
+        placeholders = ",".join("?" * len(document_ids))
+        rows = self.conn.execute(
+            f"SELECT block_id, document_id, vector FROM block_embeddings "
+            f"WHERE document_id IN ({placeholders})",
+            tuple(document_ids),
+        ).fetchall()
+        for r in rows:
+            yield r["block_id"], r["document_id"], unpack_vector(r["vector"])
 
     def get_user_tags(self, user_id: int) -> list[dict]:
         rows = self.conn.execute(
