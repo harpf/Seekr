@@ -148,3 +148,126 @@ def test_reorganize_apply_audits_moves(tmp_path, monkeypatch):
         assert len(rows) == 1
         assert rows[0]["target_id"] == str(doc_id)
         assert "new_path" in rows[0]["detail"]
+
+
+def test_user_create_and_delete_audited(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = _login(client)
+        r = client.post("/api/users", headers={"X-Auth-Token": token},
+                        json={"username": "carol", "password": "carol-pass-1", "role": "user"})
+        assert r.status_code == 200, r.text
+        new_id = r.json()["id"]
+        r = client.delete(f"/api/users/{new_id}", headers={"X-Auth-Token": token})
+        assert r.status_code == 200, r.text
+
+        from document_search.index.sqlite_store import SqliteStore
+        db = SqliteStore(tmp_path / "t.db")
+        created = db.list_audit(action="user.create")
+        deleted = db.list_audit(action="user.delete")
+        assert len(created) == 1 and created[0]["target_id"] == str(new_id)
+        assert created[0]["detail"]["username"] == "carol"
+        assert len(deleted) == 1 and deleted[0]["target_id"] == str(new_id)
+
+
+def test_update_role_and_change_password_audited(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = _login(client)
+        new_id = client.post("/api/users", headers={"X-Auth-Token": token},
+                             json={"username": "dave", "password": "dave-pass-1", "role": "user"}).json()["id"]
+        assert client.put(f"/api/users/{new_id}", headers={"X-Auth-Token": token},
+                          json={"role": "admin"}).status_code == 200
+        assert client.post(f"/api/users/{new_id}/change-password", headers={"X-Auth-Token": token},
+                           json={"new_password": "newer-pass-9"}).status_code == 200
+
+        from document_search.index.sqlite_store import SqliteStore
+        db = SqliteStore(tmp_path / "t.db")
+        assert len(db.list_audit(action="user.update_role")) == 1
+        pw = db.list_audit(action="user.change_password")
+        assert len(pw) == 1
+        # The new password must NEVER appear in the audit detail.
+        assert "newer-pass-9" not in (pw[0]["detail_json"] or "")
+
+
+def test_config_save_audited(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = _login(client)
+        r = client.post("/api/config", headers={"X-Auth-Token": token},
+                        json={
+                            "database_path": str(tmp_path / "t.db"),
+                            "supported_extensions": [".pdf", ".txt"],
+                            "exclude_dirs": [],
+                            "exclude_patterns": [],
+                            "max_file_size_mb": 50,
+                            "ollama_url": "http://localhost:11434",
+                            "ollama_model": "llama3",
+                        })
+        assert r.status_code == 200, r.text
+        from document_search.index.sqlite_store import SqliteStore
+        db = SqliteStore(tmp_path / "t.db")
+        rows = db.list_audit(action="config.save")
+        assert len(rows) == 1
+        assert rows[0]["target_type"] == "config"
+
+
+def test_audit_endpoint_requires_admin(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        admin_token = _login(client)
+        # Create a non-admin user and log in as them.
+        client.post("/api/users", headers={"X-Auth-Token": admin_token},
+                    json={"username": "erin", "password": "erin-pass-1", "role": "user"})
+        user_token = _login(client, "erin", "erin-pass-1")
+        # Non-admin: 403
+        r = client.get("/api/audit", headers={"X-Auth-Token": user_token})
+        assert r.status_code == 403
+        # No token: 401
+        assert client.get("/api/audit").status_code == 401
+        # Admin: 200
+        assert client.get("/api/audit", headers={"X-Auth-Token": admin_token}).status_code == 200
+
+
+def test_audit_endpoint_returns_items_and_total(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = _login(client)
+        for q in ("alpha", "beta", "gamma"):
+            client.post("/api/search", headers={"X-Auth-Token": token}, json={"query": q, "limit": 5})
+        r = client.get("/api/audit", headers={"X-Auth-Token": token})
+        assert r.status_code == 200
+        body = r.json()
+        assert "items" in body and "total" in body
+        assert body["total"] >= 3
+        # Items are newest-first and carry decoded detail + actor_username.
+        assert body["items"][0]["action"] == "search"
+        assert body["items"][0]["actor_username"] == "admin"
+        assert isinstance(body["items"][0]["detail"], dict)
+
+
+def test_audit_endpoint_filters_by_action(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = _login(client)
+        client.post("/api/search", headers={"X-Auth-Token": token}, json={"query": "x", "limit": 5})
+        client.post("/api/index/cleanup", headers={"X-Auth-Token": token})
+        r = client.get("/api/audit?action=documents.cleanup", headers={"X-Auth-Token": token})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["total"] == 1
+        assert all(it["action"] == "documents.cleanup" for it in body["items"])
+
+
+def test_audit_endpoint_pagination(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = _login(client)
+        for i in range(5):
+            client.post("/api/search", headers={"X-Auth-Token": token}, json={"query": str(i), "limit": 5})
+        p1 = client.get("/api/audit?limit=2&offset=0", headers={"X-Auth-Token": token}).json()
+        p2 = client.get("/api/audit?limit=2&offset=2", headers={"X-Auth-Token": token}).json()
+        assert len(p1["items"]) == 2 and len(p2["items"]) == 2
+        ids1 = {it["id"] for it in p1["items"]}
+        ids2 = {it["id"] for it in p2["items"]}
+        assert ids1.isdisjoint(ids2)

@@ -890,8 +890,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         return defaults
 
     @app.post("/api/config")
-    def api_save_config(req: UiConfigRequest, x_auth_token: str | None = Header(default=None)):
-        require_admin(x_auth_token)
+    def api_save_config(req: UiConfigRequest, request: Request, x_auth_token: str | None = Header(default=None)):
+        admin_id = require_admin(x_auth_token)
         if req.ollama_url:
             _validate_ollama_url(req.ollama_url)
         config_path.write_text(json.dumps(req.model_dump(), indent=2), encoding="utf-8")
@@ -899,6 +899,14 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             organizer.base_url = req.ollama_url.rstrip("/")
         if req.ollama_model:
             organizer.model = req.ollama_model
+        _audit(
+            admin_id,
+            "config.save",
+            target_type="config",
+            target_id=None,
+            detail={"keys": sorted(req.model_dump(exclude_none=True).keys())},
+            request=request,
+        )
         return {"status": "saved", "path": str(config_path)}
 
     @app.post("/api/login")
@@ -1767,9 +1775,45 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         db = store()
         return db.list_users()
 
-    @app.post("/api/users")
-    def api_create_user(req: UserCreateRequest, x_auth_token: str | None = Header(default=None)):
+    @app.get("/api/audit")
+    def api_audit(
+        x_auth_token: str | None = Header(default=None),
+        actor_user_id: int | None = None,
+        action: str | None = None,
+        target_type: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ):
         require_admin(x_auth_token)
+        limit = max(1, min(limit, 200))
+        offset = max(0, offset)
+        db = store()
+        items = db.list_audit(
+            actor_user_id=actor_user_id,
+            action=action,
+            target_type=target_type,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+            offset=offset,
+        )
+        total = db.count_audit(
+            actor_user_id=actor_user_id,
+            action=action,
+            target_type=target_type,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        # Drop the raw detail_json from the wire shape — clients use `detail`.
+        for it in items:
+            it.pop("detail_json", None)
+        return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+    @app.post("/api/users")
+    def api_create_user(req: UserCreateRequest, request: Request, x_auth_token: str | None = Header(default=None)):
+        admin_id = require_admin(x_auth_token)
         if req.role not in ("admin", "user"):
             raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")
         _validate_username(req.username)
@@ -1777,40 +1821,73 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         db = store()
         try:
             user_id = db.create_user(req.username, req.password, req.role)
+            _audit(
+                admin_id,
+                "user.create",
+                target_type="user",
+                target_id=user_id,
+                detail={"username": req.username, "role": req.role},
+                request=request,
+            )
             return {"id": user_id, "username": req.username, "role": req.role}
         except Exception as e:
             raise _client_error("Could not create user (it may already exist).", e, 400)
 
     @app.put("/api/users/{user_id}")
-    def api_update_user(user_id: int, req: UserUpdateRequest, x_auth_token: str | None = Header(default=None)):
-        require_admin(x_auth_token)
+    def api_update_user(user_id: int, req: UserUpdateRequest, request: Request, x_auth_token: str | None = Header(default=None)):
+        admin_id = require_admin(x_auth_token)
         if req.role not in ("admin", "user"):
             raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")
         db = store()
         if not db.get_user_by_id(user_id):
             raise HTTPException(status_code=404, detail="User not found")
         db.update_user_role(user_id, req.role)
+        _audit(
+            admin_id,
+            "user.update_role",
+            target_type="user",
+            target_id=user_id,
+            detail={"role": req.role},
+            request=request,
+        )
         return {"status": "updated"}
 
     @app.delete("/api/users/{user_id}")
-    def api_delete_user(user_id: int, x_auth_token: str | None = Header(default=None)):
+    def api_delete_user(user_id: int, request: Request, x_auth_token: str | None = Header(default=None)):
         admin_id = require_admin(x_auth_token)
         if user_id == admin_id:
             raise HTTPException(status_code=400, detail="Cannot delete your own account")
         db = store()
-        if not db.get_user_by_id(user_id):
+        existing = db.get_user_by_id(user_id)
+        if not existing:
             raise HTTPException(status_code=404, detail="User not found")
         db.delete_user(user_id)
+        _audit(
+            admin_id,
+            "user.delete",
+            target_type="user",
+            target_id=user_id,
+            detail={"username": existing["username"]},
+            request=request,
+        )
         return {"status": "deleted"}
 
     @app.post("/api/users/{user_id}/change-password")
-    def api_change_password(user_id: int, req: ChangePasswordRequest, x_auth_token: str | None = Header(default=None)):
-        require_admin(x_auth_token)
+    def api_change_password(user_id: int, req: ChangePasswordRequest, request: Request, x_auth_token: str | None = Header(default=None)):
+        admin_id = require_admin(x_auth_token)
         _validate_password(req.new_password)
         db = store()
         if not db.get_user_by_id(user_id):
             raise HTTPException(status_code=404, detail="User not found")
         db.change_password(user_id, req.new_password)
+        _audit(
+            admin_id,
+            "user.change_password",
+            target_type="user",
+            target_id=user_id,
+            detail=None,  # never record password material
+            request=request,
+        )
         return {"status": "password changed"}
 
     # ── Groups (admin) ─────────────────────────────────────────────────
@@ -2068,8 +2145,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             return {"configured": True, "cert_path": str(cert_path), "key_path": str(key_path), "error": str(e)}
 
     @app.post("/api/ssl/generate")
-    def api_ssl_generate(req: SslGenerateRequest, x_auth_token: str | None = Header(default=None)):
-        require_admin(x_auth_token)
+    def api_ssl_generate(req: SslGenerateRequest, request: Request, x_auth_token: str | None = Header(default=None)):
+        admin_id = require_admin(x_auth_token)
         try:
             from cryptography import x509
             from cryptography.hazmat.backends import default_backend
@@ -2117,6 +2194,14 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             if os.name != "nt":
                 key_path.chmod(0o600)
 
+            _audit(
+                admin_id,
+                "ssl.generate",
+                target_type="ssl",
+                target_id=None,
+                detail={"common_name": req.common_name, "days": req.days},
+                request=request,
+            )
             return {
                 "ok": True,
                 "cert_path": str(cert_path),
@@ -2387,11 +2472,12 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     @app.post("/api/ssl/upload")
     async def api_ssl_upload(
+        request: Request,
         x_auth_token: str | None = Header(default=None),
         cert_file: UploadFile = File(...),
         key_file: UploadFile = File(...),
     ):
-        require_admin(x_auth_token)
+        admin_id = require_admin(x_auth_token)
         try:
             from cryptography import x509
             from cryptography.hazmat.backends import default_backend
@@ -2408,6 +2494,14 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             if os.name != "nt":
                 key_path.chmod(0o600)
 
+            _audit(
+                admin_id,
+                "ssl.upload",
+                target_type="ssl",
+                target_id=None,
+                detail={"cert_filename": cert_file.filename},
+                request=request,
+            )
             return {"ok": True, "cert_path": str(cert_path), "key_path": str(key_path)}
         except ImportError:
             raise HTTPException(status_code=501, detail="cryptography package not installed")
