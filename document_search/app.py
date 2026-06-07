@@ -869,6 +869,35 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         removed = db.remove_missing()
         return {"removed": removed}
 
+    @app.get("/api/documents/duplicates")
+    def api_documents_duplicates(x_auth_token: str | None = Header(default=None)):
+        admin_id = require_admin(x_auth_token)
+        db = store()
+        from document_search.services.acl_service import visible_document_ids_subquery
+
+        acl_sql, acl_params = visible_document_ids_subquery(admin_id)
+        visible_ids = {
+            r["document_id"]
+            for r in db.conn.execute(
+                f"SELECT document_id FROM ({acl_sql})", acl_params
+            ).fetchall()
+        }
+
+        def _filter_groups(groups: list[dict]) -> list[dict]:
+            out = []
+            for g in groups:
+                members = [d for d in g["documents"] if d["id"] in visible_ids]
+                if len(members) > 1:
+                    out.append(
+                        {"hash": g["hash"], "count": len(members), "documents": members}
+                    )
+            return out
+
+        return {
+            "exact": _filter_groups(db.find_exact_duplicate_groups()),
+            "content": _filter_groups(db.find_content_duplicate_groups()),
+        }
+
     @app.post("/api/ai/suggest-structure")
     def api_ai_suggest_structure(
         sample_size: int = 50,
