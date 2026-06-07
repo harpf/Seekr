@@ -46,6 +46,7 @@ from document_search.extractors.txt_extractor import TxtTextExtractor
 from document_search.index.search_service import search
 from document_search.index.sqlite_store import SqliteStore
 from document_search.logging_config import configure_logging
+from document_search.services.acl_service import can_write
 from document_search.services.ai_organizer import AiOrganizer
 from document_search.services.file_service import fingerprint
 
@@ -759,11 +760,14 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     @app.post("/api/documents/{document_id}/reindex")
     def api_reindex_document(document_id: int, x_auth_token: str | None = Header(default=None)):
-        require_user(x_auth_token)
+        user_id = require_user(x_auth_token)
         db = store()
         doc = db.get_document_by_id(document_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
+        is_admin = (db.get_user_by_id(user_id) or {})["role"] == "admin"
+        if not is_admin and not can_write(db.conn, user_id, document_id):
+            raise HTTPException(status_code=403, detail="You do not have write access to this document")
         p = Path(doc["path"])
         if not p.exists():
             raise HTTPException(status_code=404, detail="File no longer exists on disk")
@@ -1810,8 +1814,9 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         req: ReorganizeApplyRequest,
         x_auth_token: str | None = Header(default=None),
     ):
-        require_admin(x_auth_token)
+        apply_user_id = require_admin(x_auth_token)
         db = store()
+        is_admin_apply = True  # require_admin guarantees admin
         upload_root_resolved = upload_root.resolve()
         results = []
 
@@ -1819,6 +1824,10 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             doc = db.get_document_by_id(item.document_id)
             if not doc:
                 results.append({"document_id": item.document_id, "status": "not_found"})
+                continue
+
+            if not is_admin_apply and not can_write(db.conn, apply_user_id, item.document_id):
+                results.append({"document_id": item.document_id, "status": "forbidden"})
                 continue
 
             current = Path(doc["path"])

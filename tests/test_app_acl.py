@@ -193,3 +193,83 @@ def test_acl_list_404_for_unknown_document(tmp_path):
         tok = _login(client)
         r = client.get("/api/acl/documents/999999", headers={"X-Auth-Token": tok})
         assert r.status_code == 404
+
+
+def _seed_doc_with_owner(db_path, owner_principal, path):
+    store = SqliteStore(Path(db_path))
+    now = datetime.now(tz=UTC).isoformat()
+    cur = store.conn.execute(
+        "INSERT INTO documents(path, filename, extension, file_size, modified_at, "
+        "sha256, indexed_at, status, owner_principal_id) VALUES(?,?,?,?,?,?,?,?,?)",
+        (path, Path(path).name, ".txt", 1, now, "hW", now, "ok", owner_principal),
+    )
+    store.conn.commit()
+    return cur.lastrowid
+
+
+def test_reindex_rejected_for_non_owner_without_write(tmp_path):
+    db = tmp_path / "t.db"
+    app = create_app(str(db))
+    with TestClient(app) as client:
+        admin = _login(client)
+        alice_id = _create_user(client, admin, "alice")
+        _create_user(client, admin, "bob")
+        store = SqliteStore(db)
+        alice_p = store.conn.execute(
+            "SELECT principal_id FROM users WHERE id=?", (alice_id,)
+        ).fetchone()["principal_id"]
+        f = tmp_path / "owned.txt"
+        f.write_text("hello", encoding="utf-8")
+        doc = _seed_doc_with_owner(db, alice_p, str(f))
+        bob = _login(client, "bob", "pw-123456")
+        r = client.post(f"/api/documents/{doc}/reindex", headers={"X-Auth-Token": bob})
+        assert r.status_code == 403, r.text
+
+
+def test_reindex_allowed_for_owner(tmp_path):
+    db = tmp_path / "t.db"
+    app = create_app(str(db))
+    with TestClient(app) as client:
+        admin = _login(client)
+        alice_id = _create_user(client, admin, "alice")
+        store = SqliteStore(db)
+        alice_p = store.conn.execute(
+            "SELECT principal_id FROM users WHERE id=?", (alice_id,)
+        ).fetchone()["principal_id"]
+        f = tmp_path / "owned2.txt"
+        f.write_text("hello world", encoding="utf-8")
+        doc = _seed_doc_with_owner(db, alice_p, str(f))
+        alice = _login(client, "alice", "pw-123456")
+        r = client.post(f"/api/documents/{doc}/reindex", headers={"X-Auth-Token": alice})
+        assert r.status_code == 200, r.text
+
+
+def test_reindex_allowed_for_admin(tmp_path):
+    db = tmp_path / "t.db"
+    app = create_app(str(db))
+    with TestClient(app) as client:
+        admin = _login(client)
+        alice_id = _create_user(client, admin, "alice")
+        store = SqliteStore(db)
+        alice_p = store.conn.execute(
+            "SELECT principal_id FROM users WHERE id=?", (alice_id,)
+        ).fetchone()["principal_id"]
+        f = tmp_path / "owned3.txt"
+        f.write_text("admin can reindex", encoding="utf-8")
+        doc = _seed_doc_with_owner(db, alice_p, str(f))
+        r = client.post(f"/api/documents/{doc}/reindex", headers={"X-Auth-Token": admin})
+        assert r.status_code == 200, r.text
+
+
+def test_reindex_allowed_for_unmanaged_legacy_doc(tmp_path):
+    db = tmp_path / "t.db"
+    app = create_app(str(db))
+    with TestClient(app) as client:
+        admin = _login(client)
+        _create_user(client, admin, "bob")
+        f = tmp_path / "legacy.txt"
+        f.write_text("legacy", encoding="utf-8")
+        doc = _seed_doc(db, path=str(f))  # no owner
+        bob = _login(client, "bob", "pw-123456")
+        r = client.post(f"/api/documents/{doc}/reindex", headers={"X-Auth-Token": bob})
+        assert r.status_code == 200, r.text
