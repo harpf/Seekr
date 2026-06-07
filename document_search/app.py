@@ -97,6 +97,23 @@ def _check_api_key(key: str | None) -> bool:
     return bool(_API_KEY) and bool(key) and secrets.compare_digest(_API_KEY, key)
 
 
+def _resolve_default_owner_principal_id(db) -> int | None:
+    """Resolve the configurable default owner for crawled documents.
+
+    Controlled by SEEKR_DEFAULT_OWNER_PRINCIPAL (a principal external_id, group
+    or user). Unset/blank/unknown -> None, preserving legacy behaviour (no owner;
+    visible via the public group's read ACL).
+    """
+    external_id = (os.getenv("SEEKR_DEFAULT_OWNER_PRINCIPAL") or "").strip()
+    if not external_id:
+        return None
+    row = db.conn.execute(
+        "SELECT id FROM principals WHERE external_id=? ORDER BY (type='group') DESC LIMIT 1",
+        (external_id,),
+    ).fetchone()
+    return row["id"] if row else None
+
+
 def highlight_terms(text: str, query: str) -> str:
     safe = html.escape(text)
     terms = [t for t in re.split(r"\s+", query) if t and t.upper() not in {"AND", "OR", "NOT"} and not t.startswith("-")]
@@ -310,6 +327,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         counts = {"found": 0, "indexed": 0, "skipped": 0, "updated": 0, "errors": 0, "done": 0}
         # Use a worker-thread-owned SqliteStore (do NOT call `store()` which is request-thread-local)
         db = SqliteStore(Path(db_path))
+        default_owner_pid = _resolve_default_owner_principal_id(db)
         for path in iter_documents([Path(p) for p in paths], cfg):
             counts["found"] += 1
             fp = fingerprint(path)
@@ -325,7 +343,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 progress_cb(dict(counts))
                 continue
             result = extr.extract(path)
-            db.upsert_document(fp, result)
+            db.upsert_document(fp, result, owner_principal_id=default_owner_pid)
             if result.status == "error":
                 counts["errors"] += 1
             elif existing:

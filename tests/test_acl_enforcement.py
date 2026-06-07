@@ -187,3 +187,35 @@ def test_upload_sets_uploader_as_owner(app_client):
         "SELECT principal_id FROM users WHERE username='admin'"
     ).fetchone()["principal_id"]
     assert owner == admin_pid
+
+
+def test_crawl_default_owner_env_sets_owner(tmp_path, monkeypatch):
+    """When SEEKR_DEFAULT_OWNER_PRINCIPAL names a principal external_id, the
+    resolver returns its id; unset returns None."""
+    from datetime import UTC, datetime
+
+    from document_search.index.sqlite_store import SqliteStore
+    store = SqliteStore(tmp_path / "index.db")
+    now = datetime.now(tz=UTC).isoformat()
+    store.conn.execute(
+        "INSERT OR IGNORE INTO principals(type, external_id, display_name, created_at) "
+        "VALUES('group','staff','Staff',?)",
+        (now,),
+    )
+    store.conn.commit()
+    monkeypatch.setenv("SEEKR_DEFAULT_OWNER_PRINCIPAL", "staff")
+
+    from document_search.app import _resolve_default_owner_principal_id
+    pid = _resolve_default_owner_principal_id(store)
+    expected = store.conn.execute(
+        "SELECT id FROM principals WHERE type='group' AND external_id='staff'"
+    ).fetchone()["id"]
+    assert pid == expected
+
+
+def test_crawl_default_owner_unset_is_none(tmp_path, monkeypatch):
+    from document_search.index.sqlite_store import SqliteStore
+    store = SqliteStore(tmp_path / "index.db")
+    monkeypatch.delenv("SEEKR_DEFAULT_OWNER_PRINCIPAL", raising=False)
+    from document_search.app import _resolve_default_owner_principal_id
+    assert _resolve_default_owner_principal_id(store) is None
