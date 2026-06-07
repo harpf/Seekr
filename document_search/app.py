@@ -251,6 +251,21 @@ class TagsRequest(BaseModel):
     tags: list[str]
 
 
+class GroupCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    display_name: str | None = None
+
+
+class GroupMemberRequest(BaseModel):
+    user_id: int
+
+
+class GrantRequest(BaseModel):
+    document_id: int
+    principal_id: int
+    permission: str  # 'read' | 'write'
+
+
 @dataclass
 class JobState:
     status: str
@@ -1302,6 +1317,62 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             raise HTTPException(status_code=404, detail="User not found")
         db.change_password(user_id, req.new_password)
         return {"status": "password changed"}
+
+    # ── Groups (admin) ─────────────────────────────────────────────────
+
+    @app.get("/api/groups")
+    def api_list_groups(x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        return store().list_groups()
+
+    @app.post("/api/groups")
+    def api_create_group(req: GroupCreateRequest, x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        name = req.name.strip().lower()
+        if not name:
+            raise HTTPException(status_code=400, detail="Group name must not be empty")
+        gid = store().create_group(name, req.display_name)
+        return {"id": gid, "name": name, "display_name": req.display_name or name}
+
+    @app.delete("/api/groups/{principal_id}")
+    def api_delete_group(principal_id: int, x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        try:
+            store().delete_group(principal_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {"status": "deleted"}
+
+    @app.get("/api/groups/{principal_id}/members")
+    def api_list_group_members(principal_id: int, x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        return store().list_group_members(principal_id)
+
+    @app.post("/api/groups/{principal_id}/members")
+    def api_add_group_member(
+        principal_id: int,
+        req: GroupMemberRequest,
+        x_auth_token: str | None = Header(default=None),
+    ):
+        require_admin(x_auth_token)
+        try:
+            store().add_user_to_group(req.user_id, principal_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {"status": "added"}
+
+    @app.delete("/api/groups/{principal_id}/members/{user_id}")
+    def api_remove_group_member(
+        principal_id: int,
+        user_id: int,
+        x_auth_token: str | None = Header(default=None),
+    ):
+        require_admin(x_auth_token)
+        try:
+            store().remove_user_from_group(user_id, principal_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {"status": "removed"}
 
     # ── Path test & network mount ──────────────────────────────────────
 
