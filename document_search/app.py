@@ -492,6 +492,90 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             "results": state["results"],
         }
 
+    @worker.handler("ai_bulk_tag")
+    def _handle_ai_bulk_tag(payload: dict, progress_cb):
+        import hashlib
+
+        from document_search.services.acl_service import visible_document_ids_subquery
+        from document_search.services.ai_validation import (
+            AiValidationError,
+            validate_tag_suggestion,
+        )
+
+        owner_id = payload["owner_user_id"]
+        limit = min(int(payload.get("limit", 20)), 200)
+        apply = bool(payload.get("apply", False))
+
+        db = SqliteStore(Path(db_path))
+        acl_sql, acl_params = visible_document_ids_subquery(owner_id)
+        rows = db.conn.execute(
+            f"SELECT id, path, filename, extension FROM documents "
+            f"WHERE id IN ({acl_sql}) ORDER BY id LIMIT ?",
+            (*acl_params, limit),
+        ).fetchall()
+
+        state = {"total": len(rows), "done": 0, "results": []}
+        progress_cb(dict(state))
+
+        for doc in rows:
+            blocks = db.conn.execute(
+                "SELECT text FROM content_blocks WHERE document_id=? LIMIT 6",
+                (doc["id"],),
+            ).fetchall()
+            text = " ".join(b["text"][:500] for b in blocks)
+            sug = organizer.suggest(
+                file_path=Path(doc["path"]),
+                extracted_text=text,
+                tags=[],
+                metadata={"filename": doc["filename"], "extension": doc["extension"]},
+            )
+            raw = {"suggested_tags": sug.suggested_tags or []}
+            prompt_hash = hashlib.sha256(
+                f"{doc['id']}|{doc['path']}|{text[:2000]}".encode()
+            ).hexdigest()
+
+            try:
+                validated = validate_tag_suggestion(raw)
+            except AiValidationError as e:
+                state["results"].append({
+                    "document_id": doc["id"],
+                    "filename": doc["filename"],
+                    "status": "skipped",
+                    "reason": f"validation: {e}",
+                    "applied_tags": [],
+                })
+                state["done"] += 1
+                progress_cb({"total": state["total"], "done": state["done"], "results": list(state["results"])})
+                continue
+
+            if apply:
+                db.set_tags(owner_id, doc["id"], validated.suggested_tags)
+            try:
+                db.record_ai_decision(
+                    kind="bulk_tag",
+                    model=sug.model,
+                    prompt_sha256=prompt_hash,
+                    document_id=doc["id"],
+                    output={"suggested_tags": validated.suggested_tags},
+                    applied=1 if apply else 0,
+                    user_id=owner_id,
+                )
+            except Exception:  # provenance is secondary to the tag write
+                pass
+
+            state["results"].append({
+                "document_id": doc["id"],
+                "filename": doc["filename"],
+                "status": "applied" if apply else "proposed",
+                "reason": sug.reason,
+                "applied_tags": validated.suggested_tags if apply else [],
+                "proposed_tags": validated.suggested_tags,
+            })
+            state["done"] += 1
+            progress_cb({"total": state["total"], "done": state["done"], "results": list(state["results"])})
+
+        return {"total": state["total"], "done": state["done"], "results": state["results"]}
+
     @worker.handler("ai_pull")
     def _handle_ai_pull(payload: dict, progress_cb):
         model = payload.get("model")
@@ -2114,7 +2198,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         if job_id.isdigit():
             jid = int(job_id)
             job = job_store.get(jid)
-            if job and job["kind"] in ("ai_suggest_structure", "ai_reorganize", "ai_pull"):
+            if job and job["kind"] in ("ai_suggest_structure", "ai_reorganize", "ai_pull", "ai_bulk_tag"):
                 user_row = store().get_user_by_id(user_id)
                 is_admin = bool(user_row) and user_row["role"] == "admin"
                 if not is_admin and job["owner_user_id"] != user_id:
@@ -2162,6 +2246,25 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         job_id = job_store.enqueue(
             "ai_reorganize",
             payload={"limit": limit, "user_id": admin_id},
+            owner_user_id=admin_id,
+            max_retries=0,
+        )
+        return {"job_id": str(job_id)}
+
+    @app.post("/api/ai/bulk-tag/start")
+    def api_ai_bulk_tag_start(
+        req: dict,
+        x_auth_token: str | None = Header(default=None),
+    ):
+        admin_id = require_admin(x_auth_token)
+        try:
+            limit = int(req.get("limit", 20))
+        except (TypeError, ValueError):
+            limit = 20
+        apply = bool(req.get("apply", False))
+        job_id = job_store.enqueue(
+            "ai_bulk_tag",
+            payload={"owner_user_id": admin_id, "limit": limit, "apply": apply},
             owner_user_id=admin_id,
             max_retries=0,
         )
