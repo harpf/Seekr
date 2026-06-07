@@ -245,23 +245,29 @@ class SqliteStore:
     def get_document_by_id(self, document_id: int):
         return self.conn.execute("SELECT * FROM documents WHERE id = ?", (document_id,)).fetchone()
 
-    def upsert_document(self, fp: FileFingerprint, ext: ExtractionResult) -> int:
+    def upsert_document(
+        self,
+        fp: FileFingerprint,
+        ext: ExtractionResult,
+        owner_principal_id: int | None = None,
+    ) -> int:
         now = datetime.now(tz=UTC).isoformat()
         meta = ext.document_metadata
         self.conn.execute("DELETE FROM content_blocks WHERE document_id IN (SELECT id FROM documents WHERE path = ?)", (str(fp.path),))
         self.conn.execute("DELETE FROM content_fts WHERE path = ?", (str(fp.path),))
         self.conn.execute(
             """
-            INSERT INTO documents(path, filename, extension, file_size, modified_at, sha256, indexed_at, status, error_message, page_count, slide_count, metadata_json)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO documents(path, filename, extension, file_size, modified_at, sha256, indexed_at, status, error_message, page_count, slide_count, metadata_json, owner_principal_id)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(path) DO UPDATE SET
               filename=excluded.filename, extension=excluded.extension, file_size=excluded.file_size, modified_at=excluded.modified_at,
               sha256=excluded.sha256, indexed_at=excluded.indexed_at, status=excluded.status, error_message=excluded.error_message,
-              page_count=excluded.page_count, slide_count=excluded.slide_count, metadata_json=excluded.metadata_json
+              page_count=excluded.page_count, slide_count=excluded.slide_count, metadata_json=excluded.metadata_json,
+              owner_principal_id=COALESCE(excluded.owner_principal_id, documents.owner_principal_id)
             """,
             (
                 str(fp.path), fp.path.name, fp.path.suffix.lower(), fp.file_size, fp.modified_at.isoformat(), fp.sha256, now,
-                ext.status, ext.error_message, meta.get("page_count"), meta.get("slide_count"), str(meta),
+                ext.status, ext.error_message, meta.get("page_count"), meta.get("slide_count"), str(meta), owner_principal_id,
             ),
         )
         doc_id = self.conn.execute("SELECT id FROM documents WHERE path = ?", (str(fp.path),)).fetchone()[0]
@@ -318,6 +324,14 @@ class SqliteStore:
         return self.conn.execute(
             "SELECT id, username, role, created_at FROM users WHERE id=?", (user_id,)
         ).fetchone()
+
+    def get_user_principal_id(self, user_id: int) -> int | None:
+        row = self.conn.execute(
+            "SELECT principal_id FROM users WHERE id=?", (user_id,)
+        ).fetchone()
+        if not row:
+            return None
+        return row["principal_id"]
 
     def list_users(self) -> list[dict]:
         rows = self.conn.execute(
