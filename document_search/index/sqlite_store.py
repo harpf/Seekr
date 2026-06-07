@@ -138,13 +138,14 @@ class SqliteStore:
             CREATE TABLE IF NOT EXISTS jobs (
               id INTEGER PRIMARY KEY,
               kind TEXT NOT NULL,
-              state TEXT NOT NULL CHECK(state IN ('pending','running','succeeded','failed','interrupted')),
+              state TEXT NOT NULL CHECK(state IN ('pending','running','succeeded','failed','interrupted','cancelled')),
               payload_json TEXT NOT NULL,
               progress_json TEXT,
               result_json TEXT,
               error_message TEXT,
               retry_count INTEGER NOT NULL DEFAULT 0,
               max_retries INTEGER NOT NULL DEFAULT 0,
+              cancel_requested INTEGER NOT NULL DEFAULT 0,
               owner_user_id INTEGER,
               created_at TEXT NOT NULL,
               started_at TEXT,
@@ -184,7 +185,91 @@ class SqliteStore:
                 self.conn.commit()
         except Exception:
             pass
+        self._migrate_jobs_cancellation()
         self._backfill_acl()
+
+    def _migrate_jobs_cancellation(self) -> None:
+        """Bring a pre-cancellation `jobs` table up to the new schema.
+
+        SQLite can't ALTER a CHECK constraint, so if the stored CREATE statement
+        lacks 'cancelled' we rebuild the table preserving every row (the rebuild
+        also adds the cancel_requested column). On a fresh DB this is a no-op.
+        Idempotent: safe on every startup.
+        """
+        row = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
+        ).fetchone()
+        if row is None:
+            return
+        create_sql = row["sql"] or ""
+
+        needs_check_rebuild = "'cancelled'" not in create_sql
+        has_cancel_col = any(
+            c[1] == "cancel_requested"
+            for c in self.conn.execute("PRAGMA table_info(jobs)").fetchall()
+        )
+        if not needs_check_rebuild and has_cancel_col:
+            return
+
+        self.conn.execute("PRAGMA foreign_keys=OFF")
+        try:
+            self.conn.execute("BEGIN")
+            self.conn.execute(
+                """
+                CREATE TABLE jobs_new (
+                  id INTEGER PRIMARY KEY,
+                  kind TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN
+                    ('pending','running','succeeded','failed','interrupted','cancelled')),
+                  payload_json TEXT NOT NULL,
+                  progress_json TEXT,
+                  result_json TEXT,
+                  error_message TEXT,
+                  retry_count INTEGER NOT NULL DEFAULT 0,
+                  max_retries INTEGER NOT NULL DEFAULT 0,
+                  cancel_requested INTEGER NOT NULL DEFAULT 0,
+                  owner_user_id INTEGER,
+                  created_at TEXT NOT NULL,
+                  started_at TEXT,
+                  finished_at TEXT,
+                  next_attempt_at TEXT,
+                  FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
+                )
+                """
+            )
+            self.conn.execute(
+                """
+                INSERT INTO jobs_new
+                  (id, kind, state, payload_json, progress_json, result_json,
+                   error_message, retry_count, max_retries, owner_user_id,
+                   created_at, started_at, finished_at, next_attempt_at)
+                SELECT
+                   id, kind, state, payload_json, progress_json, result_json,
+                   error_message, retry_count, max_retries, owner_user_id,
+                   created_at, started_at, finished_at, next_attempt_at
+                FROM jobs
+                """
+            )
+            self.conn.execute("DROP TABLE jobs")
+            self.conn.execute("ALTER TABLE jobs_new RENAME TO jobs")
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_kind_state ON jobs(kind, state)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_next_attempt ON jobs(state, next_attempt_at)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_owner ON jobs(owner_user_id)"
+            )
+            self.conn.execute("COMMIT")
+        except Exception:
+            self.conn.execute("ROLLBACK")
+            raise
+        finally:
+            self.conn.execute("PRAGMA foreign_keys=ON")
 
     def _backfill_acl(self) -> None:
         """Idempotent backfill so existing data stays visible after ACL migration.
