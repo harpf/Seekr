@@ -190,6 +190,8 @@ async function login() {
       );
       await loadFilterOptions();
       await loadTagCloud();
+      await renderRecentSearches();
+      await renderSavedSearches();
     }
     if (document.body?.dataset?.page === 'ingest') {
       chipUploadTags = new ChipInput(
@@ -205,28 +207,157 @@ async function login() {
   }
 }
 
-// ── Recent searches ────────────────────────────────────────────────
-function saveRecentSearch(q) {
-  if (!q?.trim()) return;
-  const searches = JSON.parse(localStorage.getItem('seekr_recent') || '[]');
-  const updated = [q.trim(), ...searches.filter(s => s !== q.trim())].slice(0, 5);
-  localStorage.setItem('seekr_recent', JSON.stringify(updated));
-  renderRecentSearches();
+// ── Recent searches & saved searches (server-backed) ───────────────
+// Capture the current search filter state in the same shape the backend
+// stores it ({filetype, path, block_type, modified_from, modified_to, tags}).
+// Reads the SAME refs as _currentSearchPayload() so a captured filter set
+// re-runs identically.
+function captureFilters() {
+  return {
+    filetype: chipFiletype?.values().join(',') || null,
+    path: document.getElementById('pathFilter')?.value || null,
+    block_type: document.getElementById('blockType')?.value || null,
+    modified_from: document.getElementById('modifiedFrom')?.value || null,
+    modified_to: document.getElementById('modifiedTo')?.value || null,
+    tags: chipTagFilter?.values() ?? [],
+  };
 }
 
-function renderRecentSearches() {
+// Restore a query + filters into the search form, reveal the filter panel
+// if any filter is set, then run the search via the canonical entry point.
+function applyFilters(query, filters) {
+  const queryEl = document.getElementById('query');
+  if (!queryEl) {
+    // No search form on this page (e.g. dashboard) — navigate to /search.
+    location.href = `/search?q=${encodeURIComponent(query ?? '')}`;
+    return;
+  }
+  filters = filters || {};
+  queryEl.value = query ?? '';
+
+  const pathEl = document.getElementById('pathFilter');
+  if (pathEl) pathEl.value = filters.path || '';
+  const blockEl = document.getElementById('blockType');
+  if (blockEl) blockEl.value = filters.block_type || '';
+  const fromEl = document.getElementById('modifiedFrom');
+  if (fromEl) fromEl.value = filters.modified_from || '';
+  const toEl = document.getElementById('modifiedTo');
+  if (toEl) toEl.value = filters.modified_to || '';
+
+  const fileTypes = filters.filetype
+    ? String(filters.filetype).split(',').map(s => s.trim()).filter(Boolean)
+    : [];
+  chipFiletype?.setValues(fileTypes);
+  chipTagFilter?.setValues(Array.isArray(filters.tags) ? filters.tags : []);
+
+  const hasFilter = fileTypes.length || (filters.tags?.length) ||
+    filters.path || filters.block_type || filters.modified_from || filters.modified_to;
+  const filterBody = document.getElementById('filterBody');
+  if (hasFilter && filterBody?.classList.contains('hidden')) toggleFilters();
+
+  runSearch();
+}
+
+async function renderRecentSearches() {
   const el = document.getElementById('recentSearches');
   if (!el) return;
-  const searches = JSON.parse(localStorage.getItem('seekr_recent') || '[]');
-  if (!searches.length) {
+  if (!token) {
     el.innerHTML = '<p class="muted" style="font-size:.82rem;">No recent searches yet.</p>';
     return;
   }
-  el.innerHTML = `<div class="recent-list">${searches.map(s => `
-    <a href="/search?q=${encodeURIComponent(s)}" class="recent-item">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      ${escHtml(s)}
-    </a>`).join('')}</div>`;
+  let history;
+  try {
+    history = await api('/api/search/history');
+  } catch (_) { return; }
+  if (!history || !history.length) {
+    el.innerHTML = '<p class="muted" style="font-size:.82rem;">No recent searches yet.</p>';
+    return;
+  }
+  el.replaceChildren();
+  const list = document.createElement('div');
+  list.className = 'recent-list';
+  history.forEach(item => {
+    const a = document.createElement('a');
+    a.className = 'recent-item';
+    a.href = `/search?q=${encodeURIComponent(item.query || '')}`;
+    a.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>${escHtml(item.query || '(empty)')}`;
+    if (document.getElementById('query')) {
+      a.addEventListener('click', e => {
+        e.preventDefault();
+        applyFilters(item.query, item.filters);
+      });
+    }
+    list.appendChild(a);
+  });
+  el.appendChild(list);
+}
+
+async function saveCurrentSearch() {
+  const queryEl = document.getElementById('query');
+  const name = prompt('Name this saved search:');
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed) { showToast('Enter a name for the saved search', 'err'); return; }
+  try {
+    await api('/api/search/saved', 'POST', {
+      name: trimmed,
+      query: queryEl?.value || '',
+      filters: captureFilters(),
+    });
+    showToast('Search saved', 'ok');
+    await renderSavedSearches();
+  } catch (e) {
+    showToast(e.message, 'err');
+  }
+}
+
+async function renderSavedSearches() {
+  const card = document.getElementById('savedSearchCard');
+  const list = document.getElementById('savedSearchList');
+  if (!card || !list) return;
+  if (!token) { card.classList.add('hidden'); return; }
+  let saved;
+  try {
+    saved = await api('/api/search/saved');
+  } catch (_) { return; }
+  if (!saved || !saved.length) {
+    card.classList.add('hidden');
+    list.replaceChildren();
+    return;
+  }
+  card.classList.remove('hidden');
+  list.replaceChildren();
+  saved.forEach(item => {
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip';
+    chip.title = item.query ? `Query: ${item.query}` : 'Saved search';
+
+    const label = document.createElement('span');
+    label.textContent = item.name;
+    label.style.cursor = 'pointer';
+    label.addEventListener('click', () => applyFilters(item.query, item.filters));
+    chip.appendChild(label);
+
+    const x = document.createElement('span');
+    x.className = 'chip-x';
+    x.textContent = '×';
+    x.style.marginLeft = '.4rem';
+    x.addEventListener('click', ev => { ev.stopPropagation(); deleteSavedSearch(item.id, item.name); });
+    chip.appendChild(x);
+
+    list.appendChild(chip);
+  });
+}
+
+async function deleteSavedSearch(id, name) {
+  if (!confirm(`Delete saved search "${name}"?`)) return;
+  try {
+    await api(`/api/search/saved/${id}`, 'DELETE');
+    showToast('Saved search deleted', 'ok');
+    await renderSavedSearches();
+  } catch (e) {
+    showToast(e.message, 'err');
+  }
 }
 
 // ── Search ─────────────────────────────────────────────────────────
@@ -313,9 +444,9 @@ async function runSearch() {
   try {
     _searchState.loading = true;
     _updateLoadMore();
-    const queryStr = query.value;
     const { docs, total, hasMore, nextOffset } = await _fetchSearchPage(0);
-    if (queryStr?.trim()) saveRecentSearch(queryStr);
+    // History is recorded server-side by /api/search; refresh the list.
+    renderRecentSearches();
 
     _searchState = { offset: nextOffset, hasMore, total, loading: false };
 
@@ -2033,6 +2164,8 @@ async function bootstrap() {
       );
       await loadFilterOptions();
       await loadTagCloud();
+      await renderRecentSearches();
+      await renderSavedSearches();
       const q = new URLSearchParams(location.search).get('q');
       if (q) await runSearch();
     }
