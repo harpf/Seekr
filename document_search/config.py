@@ -29,6 +29,10 @@ class AppConfig:
     ignore_temp_office_files: bool = True
     follow_symlinks: bool = False
     scheduled_reindex: int = 0  # minutes between automatic re-index runs; 0 = disabled
+    semantic_search_enabled: bool = False
+    embed_model: str = "nomic-embed-text"
+    bm25_weight: float = 1.0
+    vector_weight: float = 1.0
     ocr: OcrConfig = field(default_factory=OcrConfig)
 
 
