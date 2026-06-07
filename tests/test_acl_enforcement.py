@@ -313,3 +313,45 @@ def test_tags_forbidden_for_non_reader(app_client):
         headers=bob,
     )
     assert r.status_code == 403
+
+
+def test_suggest_structure_sample_is_acl_filtered(tmp_path):
+    from datetime import UTC, datetime
+
+    from document_search.app import _sample_documents_for_user
+    from document_search.index.sqlite_store import SqliteStore
+    store = SqliteStore(tmp_path / "index.db")
+    alice = store.create_user("alice", "pw")
+    bob = store.create_user("bob", "pw")
+    alice_pid = store.get_user_principal_id(alice)
+    now = datetime.now(tz=UTC).isoformat()
+
+    for path, owner in [("/d/alice.txt", alice_pid), ("/d/pub.txt", None)]:
+        store.conn.execute(
+            "INSERT INTO documents(path, filename, extension, file_size, modified_at, "
+            "sha256, indexed_at, status, owner_principal_id) VALUES(?,?,?,?,?,?,?,?,?)",
+            (path, Path(path).name, ".txt", 1, now, path, now, "ok", owner),
+        )
+    store.conn.commit()
+    # Re-open to backfill public read on both; then make /d/alice.txt owner-only.
+    store = SqliteStore(tmp_path / "index.db")
+    public_id = store.conn.execute(
+        "SELECT id FROM principals WHERE type='group' AND external_id='public'"
+    ).fetchone()["id"]
+    alice_doc = store.conn.execute("SELECT id FROM documents WHERE path='/d/alice.txt'").fetchone()["id"]
+    store.conn.execute(
+        "DELETE FROM document_acl WHERE document_id=? AND principal_id=?",
+        (alice_doc, public_id),
+    )
+    # owner-grant so it stays private (backfill only re-publicizes ACL-less docs)
+    store.conn.execute(
+        "INSERT OR IGNORE INTO document_acl(document_id, principal_id, permission, granted_at) "
+        "VALUES(?,?, 'read', ?)",
+        (alice_doc, alice_pid, now),
+    )
+    store.conn.commit()
+
+    alice_paths = {r["path"] for r in _sample_documents_for_user(store, alice, 50)}
+    bob_paths = {r["path"] for r in _sample_documents_for_user(store, bob, 50)}
+    assert "/d/alice.txt" in alice_paths and "/d/pub.txt" in alice_paths
+    assert "/d/alice.txt" not in bob_paths and "/d/pub.txt" in bob_paths

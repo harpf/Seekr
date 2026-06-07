@@ -114,6 +114,27 @@ def _resolve_default_owner_principal_id(db) -> int | None:
     return row["id"] if row else None
 
 
+def _sample_documents_for_user(db, user_id: int, sample_size: int):
+    """Random sample of documents the given user may read, with tags. Used by the
+    AI suggest-structure / reorganize handlers so sampling never leaks docs the
+    requesting user cannot see."""
+    from document_search.services.acl_service import visible_document_ids_subquery
+    acl_sql, acl_params = visible_document_ids_subquery(user_id)
+    sql = f"""
+        SELECT d.id, d.filename, d.extension, d.path,
+               GROUP_CONCAT(ut.name, ', ') AS tags
+        FROM documents d
+        LEFT JOIN document_tags dt ON dt.document_id = d.id
+        LEFT JOIN user_tags ut ON ut.id = dt.tag_id
+        WHERE d.id IN ({acl_sql})
+        GROUP BY d.id
+        ORDER BY RANDOM()
+        LIMIT ?
+    """
+    params = list(acl_params) + [min(sample_size, 100)]
+    return db.conn.execute(sql, params).fetchall()
+
+
 def highlight_terms(text: str, query: str) -> str:
     safe = html.escape(text)
     terms = [t for t in re.split(r"\s+", query) if t and t.upper() not in {"AND", "OR", "NOT"} and not t.startswith("-")]
@@ -357,30 +378,23 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     @worker.handler("ai_suggest_structure")
     def _handle_ai_suggest_structure(payload: dict, progress_cb):
         sample_size = payload.get("sample_size", 50)
+        user_id = payload["user_id"]
         db = SqliteStore(Path(db_path))
-        rows = db.conn.execute(
-            """
-            SELECT d.id, d.filename, d.extension, d.path,
-                   GROUP_CONCAT(ut.name, ', ') AS tags
-            FROM documents d
-            LEFT JOIN document_tags dt ON dt.document_id = d.id
-            LEFT JOIN user_tags ut ON ut.id = dt.tag_id
-            GROUP BY d.id
-            ORDER BY RANDOM()
-            LIMIT ?
-            """,
-            (min(sample_size, 100),),
-        ).fetchall()
+        rows = _sample_documents_for_user(db, user_id, sample_size)
         result = organizer.suggest_structure([dict(r) for r in rows])
         return result
 
     @worker.handler("ai_reorganize")
     def _handle_ai_reorganize(payload: dict, progress_cb):
         limit = payload.get("limit", 10)
+        user_id = payload["user_id"]
         db = SqliteStore(Path(db_path))
+        from document_search.services.acl_service import visible_document_ids_subquery
+        acl_sql, acl_params = visible_document_ids_subquery(user_id)
         rows = db.conn.execute(
-            "SELECT id, path, filename, extension FROM documents LIMIT ?",
-            (min(limit, 50),),
+            f"SELECT d.id, d.path, d.filename, d.extension FROM documents d "
+            f"WHERE d.id IN ({acl_sql}) LIMIT ?",
+            list(acl_params) + [min(limit, 50)],
         ).fetchall()
         eligible = [r for r in rows if Path(r["path"]).is_relative_to(upload_root.resolve())]
         state = {"total": len(eligible), "done": 0, "results": []}
@@ -761,7 +775,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         user_id = require_user(x_auth_token)
         job_id = job_store.enqueue(
             "ai_suggest_structure",
-            payload={"sample_size": sample_size},
+            payload={"sample_size": sample_size, "user_id": user_id},
             owner_user_id=user_id,
             max_retries=0,
         )
@@ -1668,7 +1682,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         admin_id = require_admin(x_auth_token)
         job_id = job_store.enqueue(
             "ai_reorganize",
-            payload={"limit": limit},
+            payload={"limit": limit, "user_id": admin_id},
             owner_user_id=admin_id,
             max_retries=0,
         )
