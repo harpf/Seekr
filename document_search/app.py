@@ -43,7 +43,11 @@ from document_search.extractors.md_extractor import MdTextExtractor
 from document_search.extractors.pdf_extractor import PdfTextExtractor
 from document_search.extractors.pptx_extractor import PptxTextExtractor
 from document_search.extractors.txt_extractor import TxtTextExtractor
-from document_search.index.search_service import search
+from document_search.index.search_service import (
+    FtsQueryError,
+    count_documents,
+    search,
+)
 from document_search.index.sqlite_store import SqliteStore
 from document_search.logging_config import configure_logging
 from document_search.services.acl_service import can_write
@@ -158,6 +162,7 @@ class SearchRequest(BaseModel):
     query: str = ""
     tags: list[str] = Field(default_factory=list)
     limit: int = 20
+    offset: int = 0
     filetype: str | None = None
     path: str | None = None
     block_type: str | None = None
@@ -1288,7 +1293,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         # already scope results. There is no Seekr user identity to map onto, so we
         # explicitly bypass the ACL filter. If HA keys ever become per-user, switch
         # this to pass the mapped user_id instead. See ACL Foundation plan, Task 10.
-        rows = search(db, query, limit, None, path_filter, None, None, None, None, None, bypass_acl=True)
+        rows = search(db, query, limit, 0, None, path_filter, None, None, None, None, None, bypass_acl=True)
         results = [
             {
                 "filename": r["filename"],
@@ -2024,11 +2029,16 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             raise _client_error("Invalid certificate.", e, 400)
 
     @app.post("/api/search")
-    def api_search(req: SearchRequest, x_auth_token: str | None = Header(default=None)):
+    def api_search(req: SearchRequest, response: Response, x_auth_token: str | None = Header(default=None)):
         user_id = require_user(x_auth_token)
         db = store()
+        limit = max(1, min(req.limit, 100))
+        offset = max(0, req.offset)
         try:
-            rows = search(db, req.query, req.limit, req.filetype, req.path, req.block_type, req.modified_from, req.modified_to, req.tags, user_id)
+            rows = search(db, req.query, limit, offset, req.filetype, req.path, req.block_type, req.modified_from, req.modified_to, req.tags, user_id)
+            total = count_documents(db, req.query, req.filetype, req.path, req.block_type, req.modified_from, req.modified_to, req.tags, user_id)
+        except FtsQueryError:
+            raise HTTPException(400, "Could not parse your search query. Check quotes and operators.")
         except sqlite3.OperationalError as e:
             raise _client_error("Search query error — check your query syntax.", e, 400)
         # Group flat rows by document_id, preserving rank order
@@ -2065,6 +2075,12 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 "open_url": f"/api/files/open?document_id={doc_id}",
                 "hit_count": len(doc["hits"]),
             })
+
+        has_more = len(rows) >= limit
+        response.headers["X-Total-Count"] = str(total)
+        response.headers["X-Has-More"] = "true" if has_more else "false"
+        response.headers["X-Next-Offset"] = str(offset + limit) if has_more else str(offset)
+        response.headers["Access-Control-Expose-Headers"] = "X-Total-Count, X-Has-More, X-Next-Offset"
         return output
 
     @app.get("/api/status")

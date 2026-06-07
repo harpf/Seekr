@@ -60,7 +60,7 @@ def cmd_index(args):
 
 def cmd_search(args):
     store = SqliteStore(Path(args.db))
-    rows = search(store, args.query, args.limit, args.filetype, args.path, bypass_acl=True)
+    rows = search(store, args.query, args.limit, 0, args.filetype, args.path, bypass_acl=True)
     for r in rows:
         pos = f"{r['block_type']} {r['block_number']}"
         print(f"{r['filename']} | {pos} | {r['snippet']}")

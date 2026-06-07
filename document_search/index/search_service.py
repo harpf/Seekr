@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import sqlite3
+
 from document_search.index.sqlite_store import SqliteStore
+
+
+class FtsQueryError(ValueError):
+    """Raised when an FTS MATCH query cannot be parsed by SQLite."""
 
 
 def build_match_query(
@@ -34,6 +40,7 @@ def _browse_all(
     tags: list[str],
     user_id: int | None,
     limit: int,
+    offset: int = 0,
     bypass_acl: bool = False,
 ):
     where = ["1=1"]
@@ -87,9 +94,10 @@ def _browse_all(
         JOIN content_blocks cb ON cb.document_id = d.id
         WHERE {" AND ".join(where)}
         ORDER BY d.modified_at DESC
-        LIMIT ?
+        LIMIT ? OFFSET ?
     """
     params.append(limit)
+    params.append(offset)
     return store.conn.execute(sql, tuple(params)).fetchall()
 
 
@@ -97,6 +105,7 @@ def search(
     store: SqliteStore,
     query: str,
     limit: int = 20,
+    offset: int = 0,
     filetype: str | None = None,
     path_filter: str | None = None,
     block_type: str | None = None,
@@ -115,7 +124,7 @@ def search(
     if match_query is None:
         return _browse_all(
             store, filetype, path_filter, block_type,
-            modified_from, modified_to, tags, user_id, limit,
+            modified_from, modified_to, tags, user_id, limit, offset,
             bypass_acl=bypass_acl,
         )
 
@@ -156,6 +165,113 @@ def search(
         acl_sql, acl_params = visible_document_ids_subquery(user_id)
         sql += f" AND d.id IN ({acl_sql})"
         params.extend(acl_params)
-    sql += " ORDER BY c.rank LIMIT ?"
+    sql += " ORDER BY c.rank LIMIT ? OFFSET ?"
     params.append(limit)
-    return store.conn.execute(sql, tuple(params)).fetchall()
+    params.append(offset)
+    try:
+        return store.conn.execute(sql, tuple(params)).fetchall()
+    except sqlite3.OperationalError as exc:
+        raise FtsQueryError(str(exc)) from exc
+
+
+def count_documents(
+    store: SqliteStore,
+    query: str,
+    filetype: str | None = None,
+    path_filter: str | None = None,
+    block_type: str | None = None,
+    modified_from: str | None = None,
+    modified_to: str | None = None,
+    tags: list[str] | None = None,
+    user_id: int | None = None,
+    bypass_acl: bool = False,
+) -> int:
+    """Return the number of distinct documents matching the same filters as search()."""
+    if user_id is None and not bypass_acl:
+        raise ValueError("user_id is required unless bypass_acl=True is set explicitly")
+
+    tags = [t.lower().strip() for t in (tags or [])]
+    match_query = build_match_query(query, filetype, block_type)
+
+    if match_query is None:
+        where = ["1=1"]
+        params: list = []
+        if filetype:
+            exts = ["." + e.strip().lstrip(".") for e in filetype.split(",") if e.strip()]
+            placeholders = ",".join("?" * len(exts))
+            where.append(f"d.extension IN ({placeholders})")
+            params.extend(exts)
+        if path_filter:
+            where.append("d.path LIKE ?")
+            params.append(path_filter + "%")
+        if block_type:
+            where.append("cb.block_type = ?")
+            params.append(block_type)
+        if modified_from:
+            where.append("d.modified_at >= ?")
+            params.append(modified_from)
+        if modified_to:
+            where.append("d.modified_at <= ?")
+            params.append(modified_to)
+        if tags and user_id is not None:
+            tag_ph = ",".join("?" * len(tags))
+            where.append(
+                f"""d.id IN (
+                    SELECT dt.document_id FROM document_tags dt
+                    JOIN user_tags ut ON ut.id = dt.tag_id
+                    WHERE dt.user_id = ? AND ut.name IN ({tag_ph})
+                    GROUP BY dt.document_id
+                    HAVING COUNT(DISTINCT ut.name) = ?
+                )"""
+            )
+            params.extend([user_id] + tags + [len(tags)])
+        if not bypass_acl:
+            from document_search.services.acl_service import visible_document_ids_subquery
+            acl_sql, acl_params = visible_document_ids_subquery(user_id)
+            where.append(f"d.id IN ({acl_sql})")
+            params.extend(acl_params)
+        sql = f"""
+            SELECT COUNT(DISTINCT d.id)
+            FROM documents d
+            JOIN content_blocks cb ON cb.document_id = d.id
+            WHERE {" AND ".join(where)}
+        """
+        return int(store.conn.execute(sql, tuple(params)).fetchone()[0])
+
+    sql = """
+        SELECT COUNT(DISTINCT c.document_id)
+        FROM content_fts c
+        JOIN documents d ON d.id = c.document_id
+        JOIN content_blocks b ON b.id = c.block_id
+        WHERE content_fts MATCH ?
+    """
+    params = [match_query]
+    if path_filter:
+        sql += " AND d.path LIKE ?"
+        params.append(path_filter + "%")
+    if modified_from:
+        sql += " AND d.modified_at >= ?"
+        params.append(modified_from)
+    if modified_to:
+        sql += " AND d.modified_at <= ?"
+        params.append(modified_to)
+    if tags and user_id is not None:
+        tag_ph = ",".join("?" * len(tags))
+        sql += f"""
+            AND d.id IN (
+                SELECT dt.document_id FROM document_tags dt
+                JOIN user_tags ut ON ut.id = dt.tag_id
+                WHERE dt.user_id = ? AND ut.name IN ({tag_ph})
+                GROUP BY dt.document_id
+                HAVING COUNT(DISTINCT ut.name) = ?
+            )"""
+        params.extend([user_id] + tags + [len(tags)])
+    if not bypass_acl:
+        from document_search.services.acl_service import visible_document_ids_subquery
+        acl_sql, acl_params = visible_document_ids_subquery(user_id)
+        sql += f" AND d.id IN ({acl_sql})"
+        params.extend(acl_params)
+    try:
+        return int(store.conn.execute(sql, tuple(params)).fetchone()[0])
+    except sqlite3.OperationalError as exc:
+        raise FtsQueryError(str(exc)) from exc
