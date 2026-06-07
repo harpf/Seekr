@@ -69,6 +69,13 @@ class Worker:
         self._poll_thread = threading.Thread(target=self._poll_loop, name="JobWorker", daemon=True)
         self._poll_thread.start()
 
+    def is_alive(self) -> bool:
+        """True if the poll thread exists and is still running.
+
+        Side-effect-free; safe to call from a readiness probe on every scrape.
+        """
+        return self._poll_thread is not None and self._poll_thread.is_alive()
+
     def stop(self, timeout: float = 5.0) -> None:
         self._stop_event.set()
         if self._poll_thread is not None:

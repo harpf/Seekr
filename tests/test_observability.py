@@ -29,3 +29,22 @@ def test_render_metrics_returns_prometheus_text():
     text = body.decode("utf-8")
     assert "seekr_http_requests_total" in text
     assert "seekr_queue_depth" in text
+
+
+def test_worker_is_alive_reflects_poll_thread(tmp_path):
+    from document_search.index.sqlite_store import SqliteStore
+    from document_search.services.job_store import JobStore
+    from document_search.services.job_worker import Worker
+
+    store = SqliteStore(tmp_path / "t.db")
+    worker = Worker(JobStore(store), max_concurrent=1, poll_interval_s=0.01)
+
+    # Not started yet -> not alive.
+    assert worker.is_alive() is False
+    worker.start()
+    try:
+        assert worker.is_alive() is True
+    finally:
+        worker.stop()
+    # Stopped -> not alive.
+    assert worker.is_alive() is False
