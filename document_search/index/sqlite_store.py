@@ -321,6 +321,52 @@ class SqliteStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    # ── ACL management: document grants ────────────────────────────────
+
+    _VALID_PERMISSIONS = ("read", "write")
+
+    def grant(self, document_id: int, principal_id: int, permission: str) -> None:
+        if permission not in self._VALID_PERMISSIONS:
+            raise ValueError(f"permission must be one of {self._VALID_PERMISSIONS}")
+        if self.conn.execute(
+            "SELECT 1 FROM documents WHERE id=?", (document_id,)
+        ).fetchone() is None:
+            raise ValueError("Document not found")
+        if self.conn.execute(
+            "SELECT 1 FROM principals WHERE id=?", (principal_id,)
+        ).fetchone() is None:
+            raise ValueError("Principal not found")
+        now = datetime.now(tz=UTC).isoformat()
+        self.conn.execute(
+            "INSERT OR IGNORE INTO document_acl(document_id, principal_id, permission, granted_at) "
+            "VALUES(?, ?, ?, ?)",
+            (document_id, principal_id, permission, now),
+        )
+        self.conn.commit()
+
+    def revoke(self, document_id: int, principal_id: int, permission: str) -> None:
+        if permission not in self._VALID_PERMISSIONS:
+            raise ValueError(f"permission must be one of {self._VALID_PERMISSIONS}")
+        self.conn.execute(
+            "DELETE FROM document_acl WHERE document_id=? AND principal_id=? AND permission=?",
+            (document_id, principal_id, permission),
+        )
+        self.conn.commit()
+
+    def list_document_acl(self, document_id: int) -> list[dict]:
+        rows = self.conn.execute(
+            """
+            SELECT a.principal_id, p.type AS principal_type, p.external_id,
+                   p.display_name, a.permission, a.granted_at
+            FROM document_acl a
+            JOIN principals p ON p.id = a.principal_id
+            WHERE a.document_id = ?
+            ORDER BY p.type, p.external_id, a.permission
+            """,
+            (document_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def get_document(self, path: str):
         return self.conn.execute("SELECT * FROM documents WHERE path = ?", (path,)).fetchone()
 

@@ -1,3 +1,6 @@
+from datetime import UTC, datetime
+from pathlib import Path
+
 import pytest
 
 from document_search.index.sqlite_store import SqliteStore
@@ -99,3 +102,86 @@ def test_create_group_rejects_user_type_clash(store):
     gid = store.create_group("shared")
     row = store.conn.execute("SELECT type FROM principals WHERE id=?", (gid,)).fetchone()
     assert row["type"] == "group"
+
+
+def _insert_doc(store, path="/d/x.pdf", sha="h1"):
+    now = datetime.now(tz=UTC).isoformat()
+    cur = store.conn.execute(
+        "INSERT INTO documents(path, filename, extension, file_size, modified_at, "
+        "sha256, indexed_at, status) VALUES(?,?,?,?,?,?,?,?)",
+        (path, Path(path).name, ".pdf", 1, now, sha, now, "ok"),
+    )
+    store.conn.commit()
+    return cur.lastrowid
+
+
+def test_grant_inserts_acl_row(store):
+    doc = _insert_doc(store)
+    gid = store.create_group("editors")
+    store.grant(doc, gid, "write")
+    row = store.conn.execute(
+        "SELECT permission FROM document_acl WHERE document_id=? AND principal_id=?",
+        (doc, gid),
+    ).fetchone()
+    assert row["permission"] == "write"
+
+
+def test_grant_is_idempotent(store):
+    doc = _insert_doc(store)
+    gid = store.create_group("editors")
+    store.grant(doc, gid, "read")
+    store.grant(doc, gid, "read")
+    n = store.conn.execute(
+        "SELECT COUNT(*) FROM document_acl WHERE document_id=? AND principal_id=? AND permission='read'",
+        (doc, gid),
+    ).fetchone()[0]
+    assert n == 1
+
+
+def test_grant_rejects_bad_permission(store):
+    doc = _insert_doc(store)
+    gid = store.create_group("editors")
+    with pytest.raises(ValueError, match="permission"):
+        store.grant(doc, gid, "execute")
+
+
+def test_grant_rejects_unknown_document(store):
+    gid = store.create_group("editors")
+    with pytest.raises(ValueError, match="Document"):
+        store.grant(999999, gid, "read")
+
+
+def test_grant_rejects_unknown_principal(store):
+    doc = _insert_doc(store)
+    with pytest.raises(ValueError, match="Principal"):
+        store.grant(doc, 999999, "read")
+
+
+def test_revoke_removes_acl_row(store):
+    doc = _insert_doc(store)
+    gid = store.create_group("editors")
+    store.grant(doc, gid, "write")
+    store.revoke(doc, gid, "write")
+    row = store.conn.execute(
+        "SELECT 1 FROM document_acl WHERE document_id=? AND principal_id=? AND permission='write'",
+        (doc, gid),
+    ).fetchone()
+    assert row is None
+
+
+def test_list_document_acl_returns_principal_details(store):
+    doc = _insert_doc(store)
+    alice = store.create_user("alice", "pw")
+    alice_p = store.conn.execute(
+        "SELECT principal_id FROM users WHERE id=?", (alice,)
+    ).fetchone()["principal_id"]
+    gid = store.create_group("editors", display_name="Editors")
+    store.grant(doc, alice_p, "read")
+    store.grant(doc, gid, "write")
+    entries = store.list_document_acl(doc)
+    by_perm = {(e["principal_type"], e["permission"]) for e in entries}
+    assert ("user", "read") in by_perm
+    assert ("group", "write") in by_perm
+    editor = next(e for e in entries if e["principal_id"] == gid)
+    assert editor["display_name"] == "Editors"
+    assert all("password_hash" not in e for e in entries)
