@@ -239,6 +239,88 @@ class SqliteStore:
         )
         self.conn.commit()
 
+    # ── ACL management: groups & membership ────────────────────────────
+
+    def create_group(self, name: str, display_name: str | None = None) -> int:
+        """Create (or return existing) a 'group'-type principal. Idempotent on name."""
+        now = datetime.now(tz=UTC).isoformat()
+        self.conn.execute(
+            "INSERT OR IGNORE INTO principals(type, external_id, display_name, created_at) "
+            "VALUES('group', ?, ?, ?)",
+            (name, display_name or name, now),
+        )
+        self.conn.commit()
+        row = self.conn.execute(
+            "SELECT id FROM principals WHERE type='group' AND external_id=?", (name,)
+        ).fetchone()
+        return int(row["id"])
+
+    def list_groups(self) -> list[dict]:
+        rows = self.conn.execute(
+            """
+            SELECT p.id, p.external_id, p.display_name, p.created_at,
+                   (SELECT COUNT(*) FROM user_groups ug WHERE ug.principal_id = p.id) AS member_count
+            FROM principals p
+            WHERE p.type='group'
+            ORDER BY p.external_id
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_group(self, principal_id: int) -> None:
+        row = self.conn.execute(
+            "SELECT type, external_id FROM principals WHERE id=?", (principal_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError("Group not found")
+        if row["type"] != "group":
+            raise ValueError("Principal is not a group")
+        if row["external_id"] == "public":
+            raise ValueError("The 'public' group cannot be deleted")
+        self.conn.execute("DELETE FROM principals WHERE id=?", (principal_id,))
+        self.conn.commit()
+
+    def add_user_to_group(self, user_id: int, principal_id: int) -> None:
+        grp = self.conn.execute(
+            "SELECT type FROM principals WHERE id=?", (principal_id,)
+        ).fetchone()
+        if grp is None or grp["type"] != "group":
+            raise ValueError("Target principal is not a group")
+        if self.get_user_by_id(user_id) is None:
+            raise ValueError("User not found")
+        self.conn.execute(
+            "INSERT OR IGNORE INTO user_groups(user_id, principal_id) VALUES(?, ?)",
+            (user_id, principal_id),
+        )
+        self.conn.commit()
+
+    def remove_user_from_group(self, user_id: int, principal_id: int) -> None:
+        row = self.conn.execute(
+            "SELECT external_id FROM principals WHERE id=?", (principal_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError("Group not found")
+        if row["external_id"] == "public":
+            raise ValueError("Membership in the 'public' group cannot be removed")
+        self.conn.execute(
+            "DELETE FROM user_groups WHERE user_id=? AND principal_id=?",
+            (user_id, principal_id),
+        )
+        self.conn.commit()
+
+    def list_group_members(self, principal_id: int) -> list[dict]:
+        rows = self.conn.execute(
+            """
+            SELECT u.id AS user_id, u.username, u.role
+            FROM user_groups ug
+            JOIN users u ON u.id = ug.user_id
+            WHERE ug.principal_id = ?
+            ORDER BY u.username
+            """,
+            (principal_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def get_document(self, path: str):
         return self.conn.execute("SELECT * FROM documents WHERE path = ?", (path,)).fetchone()
 
