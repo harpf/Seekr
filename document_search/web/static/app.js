@@ -2316,6 +2316,99 @@ async function runIndexCleanup() {
   }
 }
 
+// ── Duplicate documents ───────────────────────────────────────────
+// Holds the most recently scanned groups so removeDuplicates() can look up
+// the rendered documents by group key without re-querying the server.
+let _duplicateGroups = {};
+
+async function loadDuplicates() {
+  const btn = document.getElementById('scanDuplicatesBtn');
+  const listEl = document.getElementById('duplicatesList');
+  if (btn) btn.classList.add('loading');
+  if (listEl) listEl.innerHTML = '';
+  _duplicateGroups = {};
+  setText('duplicatesSummary', 'Scanning…', 'info');
+  try {
+    const data = await api('/api/documents/duplicates');
+    const exact = Array.isArray(data.exact) ? data.exact : [];
+    const content = Array.isArray(data.content) ? data.content : [];
+    const total = exact.length + content.length;
+    if (total === 0) {
+      setText('duplicatesSummary', 'No duplicates found', 'ok');
+      return;
+    }
+    setText(
+      'duplicatesSummary',
+      `Found ${exact.length} exact-file group(s) and ${content.length} content group(s)`,
+      'info',
+    );
+    let html = '';
+    html += renderDuplicateGroups(exact, 'exact', 'Exact file duplicates (identical bytes)');
+    html += renderDuplicateGroups(content, 'content', 'Content duplicates (same extracted text)');
+    if (listEl) listEl.innerHTML = html;
+  } catch (e) {
+    setText('duplicatesSummary', e.message, 'err');
+    showToast(e.message, 'err');
+  } finally {
+    if (btn) btn.classList.remove('loading');
+  }
+}
+
+function renderDuplicateGroups(groups, kind, heading) {
+  if (!groups.length) return '';
+  let html = `<h3 style="font-size:.9rem;margin:1rem 0 .5rem;">${escHtml(heading)}</h3>`;
+  groups.forEach((group, idx) => {
+    const groupKey = `${kind}-${idx}`;
+    _duplicateGroups[groupKey] = group;
+    const docs = Array.isArray(group.documents) ? group.documents : [];
+    html += '<div class="card" style="margin-bottom:.75rem;padding:.75rem;">';
+    html += `<p class="muted" style="font-size:.8rem;margin-bottom:.5rem;">${docs.length} copies · hash <code>${escHtml(String(group.hash).slice(0, 12))}</code></p>`;
+    docs.forEach((d, di) => {
+      const rid = `dup-${groupKey}-${d.id}`;
+      const checked = di === 0 ? 'checked' : '';
+      html += '<label for="' + rid + '" style="display:flex;align-items:center;gap:.5rem;padding:.25rem 0;cursor:pointer;font-size:.85rem;">';
+      html += `<input type="radio" id="${rid}" name="${escHtml(groupKey)}" value="${d.id}" ${checked} />`;
+      html += `<span>${escHtml(d.path)}</span>`;
+      html += `<span class="muted" style="margin-left:auto;white-space:nowrap;">${formatBytes(d.file_size)} · #${d.id}</span>`;
+      html += '</label>';
+    });
+    html += '<div class="btn-row" style="margin-top:.5rem;">';
+    html += `<button class="btn btn-g" onclick="removeDuplicates('${groupKey}')">`;
+    html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
+    html += 'Keep selected, remove others</button>';
+    html += '</div></div>';
+  });
+  return html;
+}
+
+async function removeDuplicates(groupKey) {
+  const group = _duplicateGroups[groupKey];
+  if (!group) return;
+  const checked = document.querySelector(`input[name="${groupKey}"]:checked`);
+  if (!checked) {
+    showToast('Select a document to keep first', 'err');
+    return;
+  }
+  const keepId = Number(checked.value);
+  const docs = Array.isArray(group.documents) ? group.documents : [];
+  const removeIds = docs.map(d => d.id).filter(id => id !== keepId);
+  if (removeIds.length === 0) {
+    showToast('Nothing to remove in this group', 'info');
+    return;
+  }
+  if (!confirm(
+    `Keep #${keepId} and remove ${removeIds.length} other entr${removeIds.length === 1 ? 'y' : 'ies'} from the index?\n\n`
+    + 'This removes the entries from the search index only — the files on disk are NOT deleted.',
+  )) return;
+  try {
+    const r = await api('/api/documents/duplicates/remove', 'POST', { keep_id: keepId, remove_ids: removeIds });
+    showToast(`Removed ${r.removed} entr${r.removed === 1 ? 'y' : 'ies'}, kept #${r.kept}`, 'ok');
+    await loadDuplicates();
+  } catch (e) {
+    showToast(e.message, 'err');
+  }
+}
+
 // ── AI: Folder structure suggestions ──────────────────────────────
 async function startStructureSuggestion() {
   const btn = document.getElementById('structureStartBtn');

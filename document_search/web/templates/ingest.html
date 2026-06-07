@@ -316,6 +316,29 @@
           </div>
         </div>
 
+        <!-- Duplicate Documents (admin only) -->
+        <div class="card admin-only hidden" id="duplicatesCard">
+          <div class="card-head">
+            <div class="card-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </div>
+            <div class="card-titles">
+              <h2>Duplicate Documents</h2>
+              <p>Find documents with identical files or content and remove the extras from the index</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="btn-row">
+              <button id="scanDuplicatesBtn" class="btn btn-p" onclick="loadDuplicates()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Scan for duplicates
+              </button>
+            </div>
+            <p id="duplicatesSummary" class="feedback" style="margin-top:.5rem;"></p>
+            <div id="duplicatesList" class="gap-top"></div>
+          </div>
+        </div>
+
         <!-- AI: Folder Structure Suggestions (admin only) -->
         <div class="card admin-only hidden" id="structureSuggestCard">
           <div class="card-head">
