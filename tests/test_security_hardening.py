@@ -1,4 +1,5 @@
 import io
+import re
 from pathlib import Path
 
 import pytest
@@ -88,3 +89,29 @@ def test_upload_accepts_real_text_file(tmp_path, monkeypatch):
         r = _upload(client, token, "note.txt", b"a genuine plain text note\n")
         assert r.status_code == 200, r.text
         assert r.json()["status"] == "uploaded"
+
+
+def test_security_sensitive_deps_are_bounded():
+    """cryptography, PyYAML, pillow, jinja2, python-multipart must have an upper
+    bound (a `<` constraint) so a surprise major bump can't land unreviewed."""
+    text = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
+    sensitive = ["cryptography", "PyYAML", "pillow", "jinja2", "python-multipart"]
+    lines = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        name = re.split(r"[<>=!~ ]", line, maxsplit=1)[0]
+        lines[name.lower()] = line
+    for dep in sensitive:
+        assert dep.lower() in lines, f"{dep} missing from requirements.txt"
+        assert "<" in lines[dep.lower()], f"{dep} has no upper bound: {lines[dep.lower()]!r}"
+
+
+def test_lockfile_exists_and_pins_sensitive_deps():
+    lock = REPO_ROOT / "requirements.lock"
+    assert lock.exists(), "requirements.lock missing"
+    text = lock.read_text(encoding="utf-8").lower()
+    for dep in ("cryptography", "pyyaml", "pillow", "jinja2", "python-multipart"):
+        assert dep in text, f"{dep} not pinned in requirements.lock"
+    assert "==" in text
