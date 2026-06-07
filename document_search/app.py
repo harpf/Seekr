@@ -279,6 +279,11 @@ class GrantRequest(BaseModel):
     permission: str  # 'read' | 'write'
 
 
+class RemoveDuplicatesRequest(BaseModel):
+    keep_id: int
+    remove_ids: list[int]
+
+
 @dataclass
 class JobState:
     status: str
@@ -897,6 +902,56 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             "exact": _filter_groups(db.find_exact_duplicate_groups()),
             "content": _filter_groups(db.find_content_duplicate_groups()),
         }
+
+    @app.post("/api/documents/duplicates/remove")
+    def api_documents_duplicates_remove(
+        req: RemoveDuplicatesRequest,
+        x_auth_token: str | None = Header(default=None),
+    ):
+        admin_id = require_admin(x_auth_token)
+        db = store()
+        from document_search.services.acl_service import visible_document_ids_subquery
+
+        acl_sql, acl_params = visible_document_ids_subquery(admin_id)
+        visible_ids = {
+            r["document_id"]
+            for r in db.conn.execute(
+                f"SELECT document_id FROM ({acl_sql})", acl_params
+            ).fetchall()
+        }
+
+        # Load the keep doc; it must exist and be visible to the admin.
+        keep = db.get_document_by_id(req.keep_id)
+        if keep is None or req.keep_id not in visible_ids:
+            raise HTTPException(status_code=404, detail="Keep document not found")
+
+        # Re-derive the duplicate group SERVER-SIDE from the keep doc's hashes.
+        # Never trust the client's notion of which docs form the group.
+        group_rows = db.conn.execute(
+            "SELECT id FROM documents "
+            "WHERE sha256 = ? OR (content_hash IS NOT NULL AND content_hash = ?)",
+            (keep["sha256"], keep["content_hash"]),
+        ).fetchall()
+        group_ids = {r["id"] for r in group_rows}
+
+        for rid in req.remove_ids:
+            if rid == req.keep_id:
+                raise HTTPException(
+                    status_code=400, detail=f"Cannot remove the keep document {rid}"
+                )
+            if rid not in group_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Document {rid} is not in the same duplicate group as {req.keep_id}",
+                )
+            if rid not in visible_ids:
+                raise HTTPException(
+                    status_code=403, detail=f"Not permitted to remove document {rid}"
+                )
+
+        removed = list(req.remove_ids)
+        db.delete_documents(removed)
+        return {"removed": removed, "kept": req.keep_id}
 
     @app.post("/api/ai/suggest-structure")
     def api_ai_suggest_structure(

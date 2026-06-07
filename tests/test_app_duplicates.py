@@ -91,3 +91,86 @@ def test_duplicates_empty_when_none(tmp_path):
         body = r.json()
         assert body["exact"] == []
         assert body["content"] == []
+
+
+def _seed_exact_group(db_path):
+    """Two byte-identical docs (ids 1,2) sharing sha256='sha-exact'."""
+    store = SqliteStore(db_path)
+    store.ensure_default_admin()
+    keep = _insert_doc(store, "/d/a.txt", "sha-exact")
+    dup = _insert_doc(store, "/d/b.txt", "sha-exact")
+    # A third, unrelated doc that is NOT in the group.
+    other = _insert_doc(store, "/d/c.txt", "sha-other")
+    store.conn.close()
+    SqliteStore(db_path).conn.close()
+    return keep, dup, other
+
+
+def test_remove_deletes_only_group_members(tmp_path):
+    db_path = tmp_path / "t.db"
+    keep, dup, other = _seed_exact_group(db_path)
+
+    app = create_app(str(db_path))
+    with TestClient(app) as client:
+        tok = _login(client)
+        r = client.post(
+            "/api/documents/duplicates/remove",
+            headers={"X-Auth-Token": tok},
+            json={"keep_id": keep, "remove_ids": [dup]},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json() == {"removed": [dup], "kept": keep}
+
+    db2 = SqliteStore(db_path)
+    assert db2.get_document_by_id(keep) is not None
+    assert db2.get_document_by_id(dup) is None
+    # The unrelated doc is untouched.
+    assert db2.get_document_by_id(other) is not None
+
+
+def test_remove_rejects_non_group_member(tmp_path):
+    db_path = tmp_path / "t.db"
+    keep, dup, other = _seed_exact_group(db_path)
+
+    app = create_app(str(db_path))
+    with TestClient(app) as client:
+        tok = _login(client)
+        r = client.post(
+            "/api/documents/duplicates/remove",
+            headers={"X-Auth-Token": tok},
+            json={"keep_id": keep, "remove_ids": [other]},
+        )
+        assert r.status_code == 400, r.text
+
+    # Nothing deleted.
+    db2 = SqliteStore(db_path)
+    assert db2.get_document_by_id(other) is not None
+    assert db2.get_document_by_id(dup) is not None
+
+
+def test_remove_unknown_keep_id_404(tmp_path):
+    db_path = tmp_path / "t.db"
+    keep, dup, other = _seed_exact_group(db_path)
+
+    app = create_app(str(db_path))
+    with TestClient(app) as client:
+        tok = _login(client)
+        r = client.post(
+            "/api/documents/duplicates/remove",
+            headers={"X-Auth-Token": tok},
+            json={"keep_id": 99999, "remove_ids": [dup]},
+        )
+        assert r.status_code == 404, r.text
+
+
+def test_remove_requires_admin(tmp_path):
+    db_path = tmp_path / "t.db"
+    keep, dup, other = _seed_exact_group(db_path)
+
+    app = create_app(str(db_path))
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/documents/duplicates/remove",
+            json={"keep_id": keep, "remove_ids": [dup]},
+        )
+        assert r.status_code == 401, r.text
