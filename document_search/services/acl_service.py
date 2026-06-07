@@ -37,3 +37,34 @@ def visible_document_ids_subquery(user_id: int) -> tuple[str, list]:
           )
     """
     return sql, [user_id, user_id]
+
+
+def can_read_document_subquery(user_id: int, document_id: int) -> tuple[str, list]:
+    """Return a SQL fragment + params that yields exactly one row (the
+    `document_id`) iff `user_id` is allowed to read it. Same visibility rules as
+    `visible_document_ids_subquery`, narrowed to a single document.
+
+    Intended for single-document permission checks:
+        sql, params = can_read_document_subquery(uid, doc_id)
+        allowed = conn.execute(sql, params).fetchone() is not None
+    """
+    sql = """
+        SELECT d.id AS document_id
+        FROM documents d
+        LEFT JOIN users u ON u.id = ?
+        WHERE d.id = ?
+          AND (
+            d.owner_principal_id = u.principal_id
+            OR d.id IN (
+              SELECT a.document_id FROM document_acl a
+              WHERE a.permission = 'read'
+                AND (
+                  a.principal_id = u.principal_id
+                  OR a.principal_id IN (
+                    SELECT g.principal_id FROM user_groups g WHERE g.user_id = ?
+                  )
+                )
+            )
+          )
+    """
+    return sql, [user_id, document_id, user_id]

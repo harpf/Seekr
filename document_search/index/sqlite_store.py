@@ -333,6 +333,11 @@ class SqliteStore:
             return None
         return row["principal_id"]
 
+    def user_can_read_document(self, user_id: int, document_id: int) -> bool:
+        from document_search.services.acl_service import can_read_document_subquery
+        sql, params = can_read_document_subquery(user_id, document_id)
+        return self.conn.execute(sql, tuple(params)).fetchone() is not None
+
     def list_users(self) -> list[dict]:
         rows = self.conn.execute(
             "SELECT id, username, role, created_at FROM users ORDER BY id"
