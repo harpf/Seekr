@@ -194,6 +194,20 @@ class SqliteStore:
             );
             CREATE INDEX IF NOT EXISTS idx_search_history_user ON search_history(user_id, id);
             CREATE INDEX IF NOT EXISTS idx_saved_searches_user ON saved_searches(user_id, id);
+            CREATE TABLE IF NOT EXISTS ai_decisions (
+              id INTEGER PRIMARY KEY,
+              kind TEXT NOT NULL,
+              model TEXT,
+              prompt_sha256 TEXT NOT NULL,
+              document_id INTEGER,
+              output_json TEXT NOT NULL,
+              applied INTEGER NOT NULL DEFAULT 0,
+              user_id INTEGER,
+              created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_decisions_kind ON ai_decisions(kind);
+            CREATE INDEX IF NOT EXISTS idx_ai_decisions_doc  ON ai_decisions(document_id);
+            CREATE INDEX IF NOT EXISTS idx_ai_decisions_user ON ai_decisions(user_id);
             """
         )
         # Migration: add role column for existing databases
@@ -718,6 +732,60 @@ class SqliteStore:
                 (user_id, document_id, tag_id, datetime.now(tz=UTC).isoformat()),
             )
         self.conn.commit()
+
+    def record_ai_decision(
+        self,
+        *,
+        kind: str,
+        model: str | None,
+        prompt_sha256: str,
+        document_id: int | None,
+        output: dict,
+        applied: int,
+        user_id: int | None,
+    ) -> int:
+        """Persist an audit row for a single AI decision (AGENTS.md provenance).
+
+        `output` must already be the *validated* output dict. Returns the new row id.
+        """
+        cur = self.conn.execute(
+            "INSERT INTO ai_decisions"
+            "(kind, model, prompt_sha256, document_id, output_json, applied, user_id, created_at) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (
+                kind,
+                model,
+                prompt_sha256,
+                document_id,
+                json.dumps(output),
+                int(applied),
+                user_id,
+                datetime.now(tz=UTC).isoformat(),
+            ),
+        )
+        self.conn.commit()
+        return int(cur.lastrowid)
+
+    def list_ai_decisions(
+        self,
+        document_id: int | None = None,
+        kind: str | None = None,
+        limit: int = 100,
+    ) -> list:
+        clauses = []
+        params: list = []
+        if document_id is not None:
+            clauses.append("document_id=?")
+            params.append(document_id)
+        if kind:
+            clauses.append("kind=?")
+            params.append(kind)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+        return self.conn.execute(
+            f"SELECT * FROM ai_decisions {where} ORDER BY id DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
 
     def get_doc_marks_and_tags(self, user_id: int, document_ids: list[int]) -> dict[int, dict[str, object]]:
         if not document_ids:
