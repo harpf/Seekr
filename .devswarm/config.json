@@ -1,0 +1,6 @@
+{
+  "worktreeInclude": [
+    ".devswarm-temp/linux-target-devswarm-ed25519",
+    ".devswarm-temp/linux-target-devswarm-ed25519.pub"
+  ]
+}
