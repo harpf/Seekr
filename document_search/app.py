@@ -13,6 +13,7 @@ import secrets
 import shutil
 import sqlite3
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -430,6 +431,20 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         else:
             log.warning("%s: %s", public_message, exc)
         return HTTPException(status_code=status_code, detail=public_message)
+
+    def _validate_remote_path(remote_path: str, share_type: str) -> None:
+        """Reject empty / option-injecting / malformed remote share paths."""
+        rp = (remote_path or "").strip()
+        if not rp:
+            raise HTTPException(status_code=400, detail="remote_path must not be empty")
+        if "\x00" in rp or "," in rp:
+            raise HTTPException(status_code=400, detail="remote_path contains illegal characters")
+        if rp.startswith("-"):
+            raise HTTPException(status_code=400, detail="remote_path must not start with '-'")
+        if share_type == "smb" and not rp.startswith("//"):
+            raise HTTPException(status_code=400, detail="SMB remote_path must be a //server/share UNC path")
+        if share_type == "nfs" and ":" not in rp:
+            raise HTTPException(status_code=400, detail="NFS remote_path must be host:/export")
 
     # ── HA key helpers ─────────────────────────────────────────────────
 
@@ -1220,6 +1235,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     @app.post("/api/paths/test")
     def api_path_test(req: PathTestRequest, x_auth_token: str | None = Header(default=None)):
         require_admin(x_auth_token)
+        if "\x00" in (req.path or ""):
+            raise HTTPException(status_code=400, detail="Invalid path")
         p = Path(req.path)
         exists = p.exists()
         readable = False
@@ -1255,41 +1272,61 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         require_admin(x_auth_token)
         if os.name == "nt":
             raise HTTPException(status_code=400, detail="Mount via API not supported on Windows; use Docker volume mounts instead")
+        if req.share_type not in ("smb", "nfs"):
+            raise HTTPException(status_code=400, detail=f"Unknown share type: {req.share_type}. Use 'smb' or 'nfs'")
+        _validate_remote_path(req.remote_path, req.share_type)
+
         mount_point = Path(req.mount_point)
         try:
             mount_point.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Cannot create mount point: {e}")
+            raise _client_error("Cannot create mount point.", e, 500, server_error=True)
 
-        if req.share_type == "smb":
-            options = ["vers=3.0"]
-            if req.username:
-                options.append(f"username={req.username}")
-            if req.password:
-                options.append(f"password={req.password}")
-            if req.domain:
-                options.append(f"domain={req.domain}")
-            cmd = ["mount", "-t", "cifs", req.remote_path, str(mount_point), "-o", ",".join(options)]
-        elif req.share_type == "nfs":
-            cmd = ["mount", "-t", "nfs", req.remote_path, str(mount_point)]
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown share type: {req.share_type}. Use 'smb' or 'nfs'")
+        creds_file: str | None = None
+        try:
+            if req.share_type == "smb":
+                options = ["vers=3.0"]
+                if req.username or req.password or req.domain:
+                    fd, creds_file = tempfile.mkstemp(prefix="seekr-creds-")
+                    lines = []
+                    if req.username:
+                        lines.append(f"username={req.username}")
+                    if req.password:
+                        lines.append(f"password={req.password}")
+                    if req.domain:
+                        lines.append(f"domain={req.domain}")
+                    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                        fh.write("\n".join(lines) + "\n")
+                    os.chmod(creds_file, 0o600)
+                    options.append(f"credentials={creds_file}")
+                cmd = ["mount", "-t", "cifs", req.remote_path, str(mount_point), "-o", ",".join(options)]
+            else:  # nfs (validated above)
+                cmd = ["mount", "-t", "nfs", req.remote_path, str(mount_point)]
 
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
-        return {
-            "mounted": proc.returncode == 0,
-            "exit_code": proc.returncode,
-            "stdout": proc.stdout,
-            "stderr": proc.stderr,
-            "mount_point": str(mount_point),
-        }
+            proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
+            return {
+                "mounted": proc.returncode == 0,
+                "exit_code": proc.returncode,
+                "stdout": proc.stdout,
+                "stderr": proc.stderr,
+                "mount_point": str(mount_point),
+            }
+        finally:
+            if creds_file:
+                try:
+                    os.remove(creds_file)
+                except OSError as e:
+                    log.warning("Could not remove mount credentials file %s: %s", creds_file, e)
 
     @app.post("/api/paths/unmount")
     def api_path_unmount(req: PathTestRequest, x_auth_token: str | None = Header(default=None)):
         require_admin(x_auth_token)
         if os.name == "nt":
             raise HTTPException(status_code=400, detail="Unmount not supported on Windows")
-        proc = subprocess.run(["umount", req.path], capture_output=True, text=True, check=False, timeout=30)
+        path = (req.path or "").strip()
+        if not path or path.startswith("-") or "\x00" in path:
+            raise HTTPException(status_code=400, detail="Invalid path")
+        proc = subprocess.run(["umount", path], capture_output=True, text=True, check=False, timeout=30)
         return {
             "unmounted": proc.returncode == 0,
             "exit_code": proc.returncode,

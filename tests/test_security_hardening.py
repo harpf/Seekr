@@ -9,6 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
+import document_search.app as appmod
 from document_search.app import create_app
 
 
@@ -115,3 +116,71 @@ def test_lockfile_exists_and_pins_sensitive_deps():
     for dep in ("cryptography", "pyyaml", "pillow", "jinja2", "python-multipart"):
         assert dep in text, f"{dep} not pinned in requirements.lock"
     assert "==" in text
+
+
+def test_mount_does_not_leak_credentials_in_argv(tmp_path, monkeypatch):
+    """The mount subprocess argv must never contain the literal password;
+    credentials must be passed via an -o credentials=<file> option instead."""
+    captured = {}
+
+    def fake_run(cmd, *a, **kw):
+        captured["cmd"] = list(cmd)
+        creds_file = None
+        for i, tok in enumerate(cmd):
+            if tok == "-o":
+                opts = cmd[i + 1]
+                for opt in opts.split(","):
+                    if opt.startswith("credentials="):
+                        creds_file = opt.split("=", 1)[1]
+        captured["creds_file"] = creds_file
+        if creds_file:
+            captured["creds_contents"] = Path(creds_file).read_text(encoding="utf-8")
+
+        class _P:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return _P()
+
+    monkeypatch.setattr(appmod.subprocess, "run", fake_run)
+    monkeypatch.setattr(appmod.os, "name", "posix", raising=False)
+
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = _login(client)
+        r = client.post(
+            "/api/paths/mount",
+            headers={"X-Auth-Token": token},
+            json={
+                "remote_path": "//server/share",
+                "mount_point": str(tmp_path / "mnt"),
+                "share_type": "smb",
+                "username": "alice",
+                "password": "SuperSecret123",
+                "domain": "WORKGROUP",
+            },
+        )
+        assert r.status_code == 200, r.text
+
+    argv_joined = " ".join(captured["cmd"])
+    assert "SuperSecret123" not in argv_joined, f"password leaked in argv: {captured['cmd']}"
+    assert "password=SuperSecret123" not in argv_joined
+    assert captured.get("creds_file"), "no credentials= file used"
+    assert "SuperSecret123" in captured.get("creds_contents", "")
+
+
+def test_mount_rejects_bad_remote_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(appmod.os, "name", "posix", raising=False)
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = _login(client)
+        r = client.post(
+            "/api/paths/mount",
+            headers={"X-Auth-Token": token},
+            json={
+                "remote_path": "-o,attacker=1",
+                "mount_point": str(tmp_path / "mnt"),
+                "share_type": "smb",
+            },
+        )
+        assert r.status_code == 400, r.text
