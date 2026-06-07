@@ -1709,7 +1709,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         except ImportError:
             raise HTTPException(status_code=501, detail="cryptography package not installed")
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid certificate: {e}")
+            raise _client_error("Invalid certificate.", e, 400)
 
     @app.post("/api/search")
     def api_search(req: SearchRequest, x_auth_token: str | None = Header(default=None)):
@@ -1718,7 +1718,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         try:
             rows = search(db, req.query, req.limit, req.filetype, req.path, req.block_type, req.modified_from, req.modified_to, req.tags, user_id)
         except sqlite3.OperationalError as e:
-            raise HTTPException(status_code=400, detail=f"Search query error: {e}")
+            raise _client_error("Search query error — check your query syntax.", e, 400)
         # Group flat rows by document_id, preserving rank order
         grouped: dict[int, dict] = {}
         order: list[int] = []
