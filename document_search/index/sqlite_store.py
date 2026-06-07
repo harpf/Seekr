@@ -44,6 +44,7 @@ class SqliteStore:
               modified_at TEXT NOT NULL,
               created_at TEXT,
               sha256 TEXT NOT NULL,
+              content_hash TEXT,
               indexed_at TEXT NOT NULL,
               status TEXT NOT NULL,
               error_message TEXT,
@@ -108,6 +109,7 @@ class SqliteStore:
             );
             CREATE INDEX IF NOT EXISTS idx_docs_modified_at  ON documents(modified_at);
             CREATE INDEX IF NOT EXISTS idx_docs_sha256       ON documents(sha256);
+            CREATE INDEX IF NOT EXISTS idx_docs_content_hash ON documents(content_hash);
             CREATE INDEX IF NOT EXISTS idx_blocks_doc_id     ON content_blocks(document_id);
             CREATE INDEX IF NOT EXISTS idx_doc_tags_doc_id   ON document_tags(document_id);
             CREATE INDEX IF NOT EXISTS idx_doc_tags_tag_id   ON document_tags(tag_id);
@@ -213,6 +215,12 @@ class SqliteStore:
             self.conn.commit()
         except Exception:
             pass
+        # Migration: add content_hash column for near-duplicate detection
+        try:
+            self.conn.execute("ALTER TABLE documents ADD COLUMN content_hash TEXT")
+            self.conn.commit()
+        except Exception:
+            pass
         # Ensure at least one admin exists after migration
         try:
             admin_count = self.conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
@@ -223,6 +231,7 @@ class SqliteStore:
             pass
         self._migrate_jobs_cancellation()
         self._backfill_acl()
+        self._backfill_content_hash()
 
     def _migrate_jobs_cancellation(self) -> None:
         """Bring a pre-cancellation `jobs` table up to the new schema.
@@ -358,6 +367,32 @@ class SqliteStore:
             """,
             (public_id, now),
         )
+        self.conn.commit()
+
+    def _backfill_content_hash(self) -> None:
+        """Idempotent: compute content_hash for any document that has indexed text
+        but no content_hash yet. Safe to run on every startup. Documents without
+        text blocks stay NULL and are excluded from content-duplicate grouping.
+        """
+        from document_search.services.file_service import normalized_content_hash
+
+        rows = self.conn.execute(
+            "SELECT id FROM documents WHERE content_hash IS NULL"
+        ).fetchall()
+        for row in rows:
+            doc_id = row["id"]
+            blocks = self.conn.execute(
+                "SELECT text FROM content_blocks WHERE document_id=? ORDER BY block_number",
+                (doc_id,),
+            ).fetchall()
+            if not blocks:
+                continue
+            combined = " ".join(b["text"] for b in blocks)
+            ch = normalized_content_hash(combined)
+            if ch is not None:
+                self.conn.execute(
+                    "UPDATE documents SET content_hash=? WHERE id=?", (ch, doc_id)
+                )
         self.conn.commit()
 
     # ── ACL management: groups & membership ────────────────────────────
