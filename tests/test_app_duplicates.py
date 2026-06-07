@@ -119,7 +119,7 @@ def test_remove_deletes_only_group_members(tmp_path):
             json={"keep_id": keep, "remove_ids": [dup]},
         )
         assert r.status_code == 200, r.text
-        assert r.json() == {"removed": [dup], "kept": keep}
+        assert r.json() == {"removed": 1, "kept": keep}
 
     db2 = SqliteStore(db_path)
     assert db2.get_document_by_id(keep) is not None

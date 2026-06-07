@@ -949,8 +949,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                     status_code=403, detail=f"Not permitted to remove document {rid}"
                 )
 
-        removed = list(req.remove_ids)
-        db.delete_documents(removed)
+        removed = db.delete_documents(list(req.remove_ids))
         return {"removed": removed, "kept": req.keep_id}
 
     @app.post("/api/ai/suggest-structure")
