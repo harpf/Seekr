@@ -125,3 +125,54 @@ def test_clear_history_only_affects_caller(store):
     store.clear_search_history(alice)
     assert store.list_search_history(alice) == []
     assert len(store.list_search_history(bob)) == 1
+
+
+def test_create_saved_search_returns_id_and_row(store):
+    uid = store.create_user("alice", "alice-password")
+    sid = store.create_saved_search(uid, "Finance PDFs", "invoices", {"filetype": "pdf"})
+    assert isinstance(sid, int)
+    rows = store.list_saved_searches(uid)
+    assert len(rows) == 1
+    assert rows[0]["id"] == sid
+    assert rows[0]["name"] == "Finance PDFs"
+    assert rows[0]["query"] == "invoices"
+    assert rows[0]["filters"]["filetype"] == "pdf"
+
+
+def test_create_saved_search_duplicate_name_raises(store):
+    uid = store.create_user("alice", "alice-password")
+    store.create_saved_search(uid, "Dup", "a", {})
+    with pytest.raises(sqlite3.IntegrityError):
+        store.create_saved_search(uid, "Dup", "b", {})
+
+
+def test_same_name_allowed_for_different_users(store):
+    alice = store.create_user("alice", "alice-password")
+    bob = store.create_user("bob", "bob-password")
+    a = store.create_saved_search(alice, "Shared name", "a", {})
+    b = store.create_saved_search(bob, "Shared name", "b", {})
+    assert a != b
+    assert len(store.list_saved_searches(alice)) == 1
+    assert len(store.list_saved_searches(bob)) == 1
+
+
+def test_list_saved_searches_scoped_per_user(store):
+    alice = store.create_user("alice", "alice-password")
+    bob = store.create_user("bob", "bob-password")
+    store.create_saved_search(alice, "A1", "qa", {})
+    store.create_saved_search(bob, "B1", "qb", {})
+    assert [r["name"] for r in store.list_saved_searches(alice)] == ["A1"]
+    assert [r["name"] for r in store.list_saved_searches(bob)] == ["B1"]
+
+
+def test_delete_saved_search_removes_only_callers_row(store):
+    alice = store.create_user("alice", "alice-password")
+    bob = store.create_user("bob", "bob-password")
+    a_sid = store.create_saved_search(alice, "A1", "qa", {})
+    b_sid = store.create_saved_search(bob, "B1", "qb", {})
+    # Alice cannot delete Bob's saved search
+    assert store.delete_saved_search(alice, b_sid) == 0
+    assert len(store.list_saved_searches(bob)) == 1
+    # Alice can delete her own
+    assert store.delete_saved_search(alice, a_sid) == 1
+    assert store.list_saved_searches(alice) == []

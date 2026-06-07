@@ -833,6 +833,52 @@ class SqliteStore:
         self.conn.commit()
         return cur.rowcount
 
+    def create_saved_search(self, user_id: int, name: str, query: str, filters: dict) -> int:
+        """Create a named saved search for the user.
+
+        Raises sqlite3.IntegrityError if the user already has a saved search
+        with this name (UNIQUE(user_id, name)).
+        """
+        now = datetime.now(tz=UTC).isoformat()
+        cur = self.conn.execute(
+            "INSERT INTO saved_searches(user_id, name, query, filters_json, created_at) "
+            "VALUES(?,?,?,?,?)",
+            (user_id, name, query, json.dumps(filters or {}, sort_keys=True), now),
+        )
+        self.conn.commit()
+        return int(cur.lastrowid)
+
+    def list_saved_searches(self, user_id: int) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id, name, query, filters_json, created_at FROM saved_searches "
+            "WHERE user_id=? ORDER BY name COLLATE NOCASE",
+            (user_id,),
+        ).fetchall()
+        out = []
+        for r in rows:
+            try:
+                filters = json.loads(r["filters_json"]) if r["filters_json"] else {}
+            except (ValueError, TypeError):
+                filters = {}
+            out.append({
+                "id": r["id"],
+                "name": r["name"],
+                "query": r["query"],
+                "filters": filters,
+                "created_at": r["created_at"],
+            })
+        return out
+
+    def delete_saved_search(self, user_id: int, saved_id: int) -> int:
+        """Delete a saved search. Scoped to the caller — deleting another
+        user's row affects zero rows. Returns the affected row count."""
+        cur = self.conn.execute(
+            "DELETE FROM saved_searches WHERE id=? AND user_id=?",
+            (saved_id, user_id),
+        )
+        self.conn.commit()
+        return cur.rowcount
+
     def remove_missing(self) -> int:
         rows = self.conn.execute("SELECT id,path FROM documents").fetchall()
         removed = 0
