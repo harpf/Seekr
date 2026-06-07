@@ -8,6 +8,10 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from document_search.services.ai_validation import RagSummary
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +24,28 @@ Question: {query}
 
 Snippets:
 {context}
+"""
+
+_SUMMARY_PROMPT = """\
+You are a document search assistant. Summarise the answer to the user's question \
+using ONLY the numbered sources below. Cite the sources you use inline with their \
+labels in square brackets, e.g. [S1] or [S2][S3]. Do not invent sources or labels.
+
+Question: {query}
+
+Sources:
+{sources}
+
+Respond with ONLY a JSON object matching this schema exactly:
+{{
+  "summary": "2-5 sentence answer in plain text, with inline [S#] citations",
+  "citations": ["S1", "S2"]
+}}
+
+Rules:
+- summary: plain text, 2-5 sentences, only facts supported by the sources
+- citations: the list of source labels you actually used (subset of those shown)
+- If the sources do not answer the question, say so in the summary and return an empty citations list
 """
 
 _STRUCTURE_PROMPT = """\
@@ -96,6 +122,34 @@ class AiOrganizer:
         ).rstrip("/")
         self.model = model or os.getenv("DOCUMENT_SEARCH_OLLAMA_MODEL", "llama3.2")
         self.timeout = timeout
+
+    def _generate(
+        self,
+        prompt: str,
+        *,
+        format: str | None = None,
+        options: dict | None = None,
+        timeout: int | None = None,
+    ) -> dict:
+        """POST to Ollama /api/generate and return the parsed JSON envelope.
+
+        Single network seam: tests monkeypatch this method to avoid a live model.
+        Returns the raw Ollama response dict (with a 'response' string field).
+        """
+        body: dict = {"model": self.model, "prompt": prompt, "stream": False}
+        if format is not None:
+            body["format"] = format
+        if options is not None:
+            body["options"] = options
+        payload = json.dumps(body).encode()
+        req = urllib.request.Request(
+            f"{self.base_url}/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout or self.timeout) as resp:
+            return json.loads(resp.read())
 
     def is_available(self) -> bool:
         try:
@@ -353,6 +407,47 @@ class AiOrganizer:
         except Exception as e:
             logger.debug("ask() failed: %s", e)
             return None
+
+    def summarize_with_citations(
+        self,
+        *,
+        query: str,
+        sources: list[dict],
+    ) -> RagSummary:
+        """RAG: summarise `sources` to answer `query`, with validated citations.
+
+        `sources` is a list of dicts each carrying at least `document_id`,
+        `block_number`, `filename`, and `text` (a snippet/excerpt). Sources are
+        labelled S1..SN in order; the returned RagSummary.citations only ever
+        contains labels that were actually supplied (hallucinations are dropped
+        by the validator).
+
+        Raises AiValidationError if the model output cannot be validated.
+        """
+        from document_search.services.ai_validation import validate_summary
+
+        lines = []
+        allowed: set[str] = set()
+        for i, s in enumerate(sources, start=1):
+            label = f"S{i}"
+            allowed.add(label)
+            excerpt = str(s.get("text", "")).strip().replace("\n", " ")[:500]
+            lines.append(
+                f"[{label}] doc {s['document_id']} block {s['block_number']} "
+                f"({s.get('filename', '')}): {excerpt}"
+            )
+        prompt = _SUMMARY_PROMPT.format(query=query[:500], sources="\n".join(lines))
+        raw = self._generate(
+            prompt,
+            format="json",
+            options={"temperature": 0.2, "num_predict": 400},
+        )
+        try:
+            parsed = json.loads(raw.get("response", "{}"))
+        except json.JSONDecodeError as e:
+            from document_search.services.ai_validation import AiValidationError
+            raise AiValidationError(f"summary response was not valid JSON: {e}") from e
+        return validate_summary(parsed, allowed_source_ids=allowed)
 
 
 def _safe_subpath(value: object) -> str | None:
