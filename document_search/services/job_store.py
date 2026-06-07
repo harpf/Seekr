@@ -13,7 +13,9 @@ from typing import Any
 
 from document_search.index.sqlite_store import SqliteStore
 
-_VALID_STATES = ("pending", "running", "succeeded", "failed", "interrupted")
+_VALID_STATES = ("pending", "running", "succeeded", "failed", "interrupted", "cancelled")
+_ACTIVE_STATES = ("pending", "running")
+_RE_ENQUEUEABLE = ("interrupted", "failed", "cancelled")
 
 
 class JobStore:
@@ -75,6 +77,7 @@ class JobStore:
                     WHERE id = (
                       SELECT id FROM jobs
                       WHERE state='pending'
+                        AND cancel_requested = 0
                         AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
                         AND kind IN ({placeholders})
                       ORDER BY id LIMIT 1
@@ -88,6 +91,7 @@ class JobStore:
                     WHERE id = (
                       SELECT id FROM jobs
                       WHERE state='pending'
+                        AND cancel_requested = 0
                         AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
                       ORDER BY id LIMIT 1
                     )
@@ -161,6 +165,70 @@ class JobStore:
             )
             self.conn.commit()
             return cur.rowcount
+
+    def request_cancel(self, job_id: int) -> str:
+        """Ask a job to stop.
+
+        Returns 'cancelled' (pending->terminal), 'requested' (running, flag set),
+        'noop' (already terminal), or 'not_found'.
+        """
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT state FROM jobs WHERE id=?", (job_id,)
+            ).fetchone()
+            if row is None:
+                return "not_found"
+            state = row["state"]
+            if state == "pending":
+                self.conn.execute(
+                    "UPDATE jobs SET state='cancelled', cancel_requested=1, finished_at=? WHERE id=?",
+                    (self._now(), job_id),
+                )
+                self.conn.commit()
+                return "cancelled"
+            if state == "running":
+                self.conn.execute(
+                    "UPDATE jobs SET cancel_requested=1 WHERE id=?", (job_id,)
+                )
+                self.conn.commit()
+                return "requested"
+            return "noop"
+
+    def is_cancel_requested(self, job_id: int) -> bool:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT cancel_requested FROM jobs WHERE id=?", (job_id,)
+            ).fetchone()
+            return bool(row and row["cancel_requested"])
+
+    def mark_cancelled(self, job_id: int) -> None:
+        with self._lock:
+            self.conn.execute(
+                "UPDATE jobs SET state='cancelled', finished_at=? WHERE id=?",
+                (self._now(), job_id),
+            )
+            self.conn.commit()
+
+    def re_enqueue(self, job_id: int) -> int | None:
+        """Clone an interrupted/failed/cancelled job as a fresh pending job.
+        Returns the new id, or None if missing or still active."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT kind, payload_json, owner_user_id, max_retries, state "
+                "FROM jobs WHERE id=?",
+                (job_id,),
+            ).fetchone()
+            if row is None or row["state"] not in _RE_ENQUEUEABLE:
+                return None
+            now = self._now()
+            cur = self.conn.execute(
+                "INSERT INTO jobs(kind, state, payload_json, retry_count, max_retries, "
+                "owner_user_id, created_at) VALUES(?, 'pending', ?, 0, ?, ?, ?)",
+                (row["kind"], row["payload_json"], row["max_retries"],
+                 row["owner_user_id"], now),
+            )
+            self.conn.commit()
+            return int(cur.lastrowid)
 
     def list_jobs(
         self,
