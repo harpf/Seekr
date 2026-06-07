@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from datetime import UTC, datetime
@@ -7,6 +8,8 @@ from pathlib import Path
 
 from document_search.auth import hash_password, new_salt
 from document_search.models import ExtractionResult, FileFingerprint
+
+HISTORY_CAP = 20
 
 
 class SqliteStore:
@@ -772,6 +775,63 @@ class SqliteStore:
             (user_id,),
         ).fetchall()
         return [{"name": r["name"], "count": r["doc_count"]} for r in rows]
+
+    def record_search_history(self, user_id: int, query: str, filters: dict) -> None:
+        """Record a search in the user's rolling history.
+
+        No-op for empty queries (mirrors the old localStorage behaviour). The
+        entry is de-duplicated on identical query+filters (re-running an
+        identical search floats it back to the top), and the user's history is
+        trimmed to the newest HISTORY_CAP rows.
+        """
+        if not query or not query.strip():
+            return
+        filters_json = json.dumps(filters or {}, sort_keys=True)
+        now = datetime.now(tz=UTC).isoformat()
+        self.conn.execute(
+            "DELETE FROM search_history WHERE user_id=? AND query=? AND filters_json=?",
+            (user_id, query, filters_json),
+        )
+        self.conn.execute(
+            "INSERT INTO search_history(user_id, query, filters_json, created_at) VALUES(?,?,?,?)",
+            (user_id, query, filters_json, now),
+        )
+        # Trim to the newest HISTORY_CAP rows for this user
+        self.conn.execute(
+            """
+            DELETE FROM search_history
+            WHERE user_id=? AND id NOT IN (
+                SELECT id FROM search_history WHERE user_id=? ORDER BY id DESC LIMIT ?
+            )
+            """,
+            (user_id, user_id, HISTORY_CAP),
+        )
+        self.conn.commit()
+
+    def list_search_history(self, user_id: int, limit: int = HISTORY_CAP) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id, query, filters_json, created_at FROM search_history "
+            "WHERE user_id=? ORDER BY id DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
+        out = []
+        for r in rows:
+            try:
+                filters = json.loads(r["filters_json"]) if r["filters_json"] else {}
+            except (ValueError, TypeError):
+                filters = {}
+            out.append({
+                "id": r["id"],
+                "query": r["query"],
+                "filters": filters,
+                "created_at": r["created_at"],
+            })
+        return out
+
+    def clear_search_history(self, user_id: int) -> int:
+        cur = self.conn.execute("DELETE FROM search_history WHERE user_id=?", (user_id,))
+        self.conn.commit()
+        return cur.rowcount
 
     def remove_missing(self) -> int:
         rows = self.conn.execute("SELECT id,path FROM documents").fetchall()
