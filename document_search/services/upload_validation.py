@@ -53,12 +53,19 @@ _ALLOWED_MIME: dict[str, set[str]] = {
 
 
 def reject_traversal(subpath: str) -> bool:
-    """True if `subpath` must be rejected for traversal/NUL reasons."""
+    """True if `subpath` must be rejected for traversal / NUL / absolute-path reasons."""
     if not subpath:
         return False
     if "\x00" in subpath:
         return True
     normalised = subpath.replace("\\", "/")
+    # Reject absolute paths: a relative subpath must never start at the FS root
+    # (posix `/...`, UNC `//...`) or carry a Windows drive (`C:/...`).
+    if normalised.startswith("/"):
+        return True
+    if len(normalised) >= 2 and normalised[1] == ":" and normalised[0].isalpha():
+        return True
+    # Reject any `..` path component.
     return any(part == ".." for part in normalised.split("/"))
 
 

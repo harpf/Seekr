@@ -24,6 +24,16 @@ def test_reject_traversal_flags_dotdot():
     assert reject_traversal("") is False
 
 
+def test_reject_traversal_flags_absolute_paths():
+    assert reject_traversal("/etc/passwd") is True
+    assert reject_traversal("C:/Windows/System32") is True
+    assert reject_traversal("C:\\Windows\\System32") is True
+    assert reject_traversal("//server/share") is True
+    # Relative paths remain allowed
+    assert reject_traversal("inbox") is False
+    assert reject_traversal("a/b/c") is False
+
+
 PDF_BYTES = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n1 0 obj\n"
 EXE_BYTES = b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xff\x00\x00"
 TXT_BYTES = b"hello world, this is a plain text note.\n"
