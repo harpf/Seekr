@@ -756,6 +756,24 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     app.add_middleware(_SecurityHeaders)
 
+    class _PrometheusMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next) -> Response:
+            start = time.perf_counter()
+            response = await call_next(request)
+            elapsed = time.perf_counter() - start
+            # Use the matched route template (e.g. "/api/jobs/{job_id}") as the
+            # path label so cardinality stays bounded; fall back for 404s etc.
+            route = request.scope.get("route")
+            path = getattr(route, "path", None) or "<unmatched>"
+            method = request.method
+            _obs.REQUEST_LATENCY.labels(method=method, path=path).observe(elapsed)
+            _obs.REQUEST_COUNT.labels(
+                method=method, path=path, status=str(response.status_code)
+            ).inc()
+            return response
+
+    app.add_middleware(_PrometheusMiddleware)
+
     # ── Auth helpers ───────────────────────────────────────────────────
     def _evict_stale_failures(now: float) -> None:
         """Drop IP keys whose failures have all aged out, and enforce a cap."""
@@ -2649,6 +2667,25 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             "ready": is_ready,
             "checks": {"database": db_ok, "worker": worker_ok},
         }
+
+    @app.get("/metrics")
+    def metrics(authorization: str | None = Header(default=None)) -> Response:
+        """Prometheus exposition. Optionally gated by a bearer token."""
+        token = os.getenv("DOCUMENT_SEARCH_METRICS_TOKEN", "").strip()
+        if token:
+            expected = f"Bearer {token}"
+            if not authorization or not secrets.compare_digest(authorization, expected):
+                raise HTTPException(status_code=401, detail="Unauthorized")
+        try:
+            counts: dict[str, int] = {}
+            for row in job_store.list_jobs(limit=100000):
+                state = row["state"]
+                counts[state] = counts.get(state, 0) + 1
+            _obs.set_queue_depth(counts)
+        except Exception:
+            log.exception("failed to refresh queue-depth gauges for /metrics")
+        body, content_type = _obs.render_metrics()
+        return Response(content=body, media_type=content_type)
 
     @app.get("/api/status")
     def api_status(x_auth_token: str | None = Header(default=None)):

@@ -99,3 +99,60 @@ def test_ready_returns_503_when_db_unreachable(tmp_path):
         body = r.json()
         assert body["ready"] is False
         assert body["checks"]["database"] is False
+
+
+def test_metrics_endpoint_exposes_expected_names(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        r = client.get("/metrics")
+        assert r.status_code == 200, r.text
+        body = r.text
+        assert "seekr_http_requests_total" in body
+        assert "seekr_http_request_duration_seconds" in body
+        assert "seekr_queue_depth" in body
+
+
+def test_metrics_middleware_records_request_count(tmp_path):
+    from document_search import observability as _obs
+
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        # Drive a request through the middleware against a stable route template.
+        before = _obs.REQUEST_COUNT.labels(
+            method="GET", path="/health", status="200"
+        )._value.get()
+        r = client.get("/health")
+        assert r.status_code == 200, r.text
+        after = _obs.REQUEST_COUNT.labels(
+            method="GET", path="/health", status="200"
+        )._value.get()
+        assert after == before + 1
+
+
+def test_metrics_queue_depth_reflects_pending_job(tmp_path):
+    from document_search import observability as _obs
+
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        # Enqueue a job directly so a pending row exists at scrape time.
+        app.state.worker.stop(timeout=5.0)  # keep it from being claimed
+        app.state.job_store.enqueue("index_paths", {"paths": []})
+        r = client.get("/metrics")
+        assert r.status_code == 200, r.text
+        # The gauge for the pending state must be >= 1 after the scrape refresh.
+        assert _obs.QUEUE_DEPTH.labels(state="pending")._value.get() >= 1
+
+
+def test_metrics_token_gate_when_env_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOCUMENT_SEARCH_METRICS_TOKEN", "s3cr3t")
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        # No token -> 401.
+        assert client.get("/metrics").status_code == 401
+        # Wrong token -> 401.
+        assert client.get(
+            "/metrics", headers={"Authorization": "Bearer nope"}
+        ).status_code == 401
+        # Correct token -> 200.
+        ok = client.get("/metrics", headers={"Authorization": "Bearer s3cr3t"})
+        assert ok.status_code == 200, ok.text
