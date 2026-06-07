@@ -38,6 +38,17 @@ class JobStore:
     def _now() -> str:
         return datetime.now(tz=UTC).isoformat()
 
+    def ping(self) -> None:
+        """Run a trivial `SELECT 1` to confirm the shared connection is usable.
+
+        Takes the same RLock every other method uses, so a readiness probe can
+        check DB liveness without racing the worker thread on the shared
+        connection. Raises (propagates the sqlite error) if the connection is
+        closed/broken — callers (e.g. /ready) decide how to handle that.
+        """
+        with self._lock:
+            self.conn.execute("SELECT 1").fetchone()
+
     def enqueue(
         self,
         kind: str,

@@ -2680,7 +2680,9 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         """Readiness probe: dependencies (DB connection, worker thread) are healthy."""
         db_ok = True
         try:
-            job_store.store.conn.execute("SELECT 1").fetchone()
+            # Go through JobStore.ping() so the SELECT 1 takes the same RLock the
+            # worker uses — a scrape must not race the worker on the shared conn.
+            job_store.ping()
         except Exception:
             db_ok = False
         worker_ok = worker.is_alive()
