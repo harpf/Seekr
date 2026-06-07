@@ -219,3 +219,59 @@ def test_crawl_default_owner_unset_is_none(tmp_path, monkeypatch):
     monkeypatch.delenv("SEEKR_DEFAULT_OWNER_PRINCIPAL", raising=False)
     from document_search.app import _resolve_default_owner_principal_id
     assert _resolve_default_owner_principal_id(store) is None
+
+
+def _login(client, username, password):
+    r = client.post("/api/login", json={"username": username, "password": password})
+    return {"X-Auth-Token": r.json()["token"]}
+
+
+def _seed_private_doc_for_admin(client, tmp_path):
+    """Upload one doc as admin, then replace its public ACL with an explicit
+    admin-only read grant so only admin sees it.
+
+    Note: stripping the public ACL alone is not enough — SqliteStore._backfill_acl
+    re-grants public read to any document that has *no* ACL rows on the next store
+    construction (TestClient dispatches requests across worker threads, each
+    building a fresh thread-local store). Leaving an explicit owner-principal ACL
+    keeps the document private and stable.
+    """
+    admin = _admin_headers(client)
+    files = {"file": ("admin-only.txt", b"private admin content", "text/plain")}
+    r = client.post("/api/upload", files=files, headers=admin)
+    doc_id = r.json()["document_id"]
+    import os
+    from datetime import UTC, datetime
+    from pathlib import Path as _Path
+
+    from document_search.index.sqlite_store import SqliteStore
+    store = SqliteStore(_Path(os.path.join(os.getcwd(), "index.db")))
+    public_id = store.conn.execute(
+        "SELECT id FROM principals WHERE type='group' AND external_id='public'"
+    ).fetchone()["id"]
+    admin_pid = store.conn.execute(
+        "SELECT principal_id FROM users WHERE username='admin'"
+    ).fetchone()["principal_id"]
+    store.conn.execute(
+        "DELETE FROM document_acl WHERE document_id=? AND principal_id=?",
+        (doc_id, public_id),
+    )
+    store.conn.execute(
+        "INSERT OR IGNORE INTO document_acl(document_id, principal_id, permission, granted_at) "
+        "VALUES(?,?, 'read', ?)",
+        (doc_id, admin_pid, datetime.now(tz=UTC).isoformat()),
+    )
+    store.conn.commit()
+    return doc_id
+
+
+def test_status_count_is_acl_filtered(app_client):
+    client, tmp_path = app_client
+    admin = _admin_headers(client)
+    bob = _make_second_user(client, admin)
+    _seed_private_doc_for_admin(client, tmp_path)
+
+    admin_status = client.get("/api/status", headers=admin).json()
+    bob_status = client.get("/api/status", headers=bob).json()
+    assert admin_status["documents"] == 1
+    assert bob_status["documents"] == 0

@@ -1057,9 +1057,25 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 detail="Invalid or missing API key. Configure one via Config → Home Assistant.",
             )
         db = store()
-        doc_count = db.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-        block_count = db.conn.execute("SELECT COUNT(*) FROM content_blocks").fetchone()[0]
-        total_size = db.conn.execute("SELECT COALESCE(SUM(file_size), 0) FROM documents").fetchone()[0]
+        # HA has no Seekr user identity (API-key channel, mirrors _ha_search_impl's
+        # bypass_acl=True). Scope counts by the key's path_filter instead.
+        path_filter: str | None = key_cfg.get("path_filter")
+        where = ""
+        params: list = []
+        if path_filter:
+            where = " WHERE d.path LIKE ?"
+            params = [path_filter + "%"]
+        doc_count = db.conn.execute(
+            f"SELECT COUNT(*) FROM documents d{where}", params
+        ).fetchone()[0]
+        block_count = db.conn.execute(
+            f"SELECT COUNT(*) FROM content_blocks cb WHERE cb.document_id IN "
+            f"(SELECT d.id FROM documents d{where})",
+            params,
+        ).fetchone()[0]
+        total_size = db.conn.execute(
+            f"SELECT COALESCE(SUM(d.file_size), 0) FROM documents d{where}", params
+        ).fetchone()[0]
         return {
             "state": "online",
             "documents": doc_count,
@@ -1776,11 +1792,21 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     @app.get("/api/status")
     def api_status(x_auth_token: str | None = Header(default=None)):
-        require_user(x_auth_token)
+        user_id = require_user(x_auth_token)
         db = store()
-        docs = db.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-        blocks = db.conn.execute("SELECT COUNT(*) FROM content_blocks").fetchone()[0]
-        total_size = db.conn.execute("SELECT COALESCE(SUM(file_size), 0) FROM documents").fetchone()[0]
+        from document_search.services.acl_service import visible_document_ids_subquery
+        acl_sql, acl_params = visible_document_ids_subquery(user_id)
+        docs = db.conn.execute(
+            f"SELECT COUNT(*) FROM documents d WHERE d.id IN ({acl_sql})", acl_params
+        ).fetchone()[0]
+        blocks = db.conn.execute(
+            f"SELECT COUNT(*) FROM content_blocks cb WHERE cb.document_id IN ({acl_sql})",
+            acl_params,
+        ).fetchone()[0]
+        total_size = db.conn.execute(
+            f"SELECT COALESCE(SUM(d.file_size), 0) FROM documents d WHERE d.id IN ({acl_sql})",
+            acl_params,
+        ).fetchone()[0]
         return {"documents": docs, "content_blocks": blocks, "total_file_size_bytes": total_size, "db_path": db_path}
 
     @app.get("/api/files/open")
