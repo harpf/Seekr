@@ -78,3 +78,73 @@ def test_file_open_writes_audit_row(tmp_path):
         assert len(rows) == 1
         assert rows[0]["target_type"] == "document"
         assert rows[0]["target_id"] == str(doc_id)
+
+
+def test_reindex_writes_audit_row(tmp_path):
+    target = tmp_path / "r.txt"
+    target.write_text("reindex me", encoding="utf-8")
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = _login(client)
+        from datetime import UTC, datetime
+
+        from document_search.index.sqlite_store import SqliteStore
+        db = SqliteStore(tmp_path / "t.db")
+        now = datetime.now(tz=UTC).isoformat()
+        db.conn.execute(
+            "INSERT INTO documents(path, filename, extension, file_size, modified_at, sha256, indexed_at, status) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (str(target), "r.txt", ".txt", 10, now, "h", now, "ok"),
+        )
+        db.conn.commit()
+        doc_id = db.conn.execute("SELECT id FROM documents WHERE path=?", (str(target),)).fetchone()[0]
+        r = client.post(f"/api/documents/{doc_id}/reindex", headers={"X-Auth-Token": token})
+        assert r.status_code == 200, r.text
+        rows = db.list_audit(action="document.reindex")
+        assert len(rows) == 1
+        assert rows[0]["target_id"] == str(doc_id)
+
+
+def test_cleanup_writes_audit_row(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = _login(client)
+        r = client.post("/api/index/cleanup", headers={"X-Auth-Token": token})
+        assert r.status_code == 200, r.text
+        from document_search.index.sqlite_store import SqliteStore
+        db = SqliteStore(tmp_path / "t.db")
+        rows = db.list_audit(action="documents.cleanup")
+        assert len(rows) == 1
+        assert "removed" in rows[0]["detail"]
+
+
+def test_reorganize_apply_audits_moves(tmp_path, monkeypatch):
+    """A successful move writes a document.move audit row carrying old + new path."""
+    upload_root = tmp_path / "uploads"
+    (upload_root / "sub").mkdir(parents=True)
+    src = upload_root / "movable.txt"
+    src.write_text("data", encoding="utf-8")
+    monkeypatch.setenv("DOCUMENT_SEARCH_UPLOAD_ROOT", str(upload_root))
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = _login(client)
+        from datetime import UTC, datetime
+
+        from document_search.index.sqlite_store import SqliteStore
+        db = SqliteStore(tmp_path / "t.db")
+        now = datetime.now(tz=UTC).isoformat()
+        db.conn.execute(
+            "INSERT INTO documents(path, filename, extension, file_size, modified_at, sha256, indexed_at, status) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (str(src), "movable.txt", ".txt", 4, now, "h", now, "ok"),
+        )
+        db.conn.commit()
+        doc_id = db.conn.execute("SELECT id FROM documents WHERE path=?", (str(src),)).fetchone()[0]
+        r = client.post("/api/ai/reorganize/apply", headers={"X-Auth-Token": token},
+                        json={"moves": [{"document_id": doc_id, "new_subpath": "sub"}]})
+        assert r.status_code == 200, r.text
+        assert r.json()[0]["status"] == "moved"
+        rows = db.list_audit(action="document.move")
+        assert len(rows) == 1
+        assert rows[0]["target_id"] == str(doc_id)
+        assert "new_path" in rows[0]["detail"]

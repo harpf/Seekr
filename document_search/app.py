@@ -960,7 +960,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         return db.get_user_tags(user_id)
 
     @app.post("/api/documents/{document_id}/reindex")
-    def api_reindex_document(document_id: int, x_auth_token: str | None = Header(default=None)):
+    def api_reindex_document(document_id: int, request: Request, x_auth_token: str | None = Header(default=None)):
         user_id = require_user(x_auth_token)
         db = store()
         doc = db.get_document_by_id(document_id)
@@ -978,13 +978,29 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         fp = fingerprint(p)
         result = extractor.extract(p)
         db.upsert_document(fp, result)
+        _audit(
+            user_id,
+            "document.reindex",
+            target_type="document",
+            target_id=document_id,
+            detail={"path": doc["path"], "extraction_status": result.status},
+            request=request,
+        )
         return {"status": "reindexed", "document_id": document_id, "blocks": len(result.blocks), "extraction_status": result.status}
 
     @app.post("/api/index/cleanup")
-    def api_index_cleanup(x_auth_token: str | None = Header(default=None)):
-        require_admin(x_auth_token)
+    def api_index_cleanup(request: Request, x_auth_token: str | None = Header(default=None)):
+        admin_id = require_admin(x_auth_token)
         db = store()
         removed = db.remove_missing()
+        _audit(
+            admin_id,
+            "documents.cleanup",
+            target_type="documents",
+            target_id=None,
+            detail={"removed": removed},
+            request=request,
+        )
         return {"removed": removed}
 
     @app.get("/api/documents/duplicates")
@@ -1154,6 +1170,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     @app.post("/api/upload")
     async def api_upload(
+        request: Request,
         x_auth_token: str | None = Header(default=None),
         file: UploadFile = File(...),
         target_subpath: str = Form(default=""),
@@ -1229,6 +1246,14 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         else:
             doc_id = None
 
+        _audit(
+            user_id,
+            "upload",
+            target_type="document",
+            target_id=doc_id,
+            detail={"path": str(out), "filename": safe_name, "tags": tag_list},
+            request=request,
+        )
         return {"status": "uploaded", "path": str(out), "document_id": doc_id, "ai_suggestion": asdict(suggestion)}
 
     @app.get("/api/folders")
@@ -2302,6 +2327,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     @app.post("/api/ai/reorganize/apply")
     def api_ai_reorganize_apply(
         req: ReorganizeApplyRequest,
+        request: Request,
         x_auth_token: str | None = Header(default=None),
     ):
         apply_user_id = require_admin(x_auth_token)
@@ -2345,6 +2371,14 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 if sidecar.exists():
                     shutil.move(str(sidecar), str(new_path) + ".meta.json")
                 db.move_document(item.document_id, str(new_path))
+                _audit(
+                    apply_user_id,
+                    "document.move",
+                    target_type="document",
+                    target_id=item.document_id,
+                    detail={"old_path": str(current), "new_path": str(new_path)},
+                    request=request,
+                )
                 results.append({"document_id": item.document_id, "status": "moved", "new_path": str(new_path)})
             except Exception as e:
                 results.append({"document_id": item.document_id, "status": "error", "detail": str(e)})
