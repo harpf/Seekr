@@ -24,6 +24,13 @@ log = logging.getLogger(__name__)
 Handler = Callable[[dict, Callable[[dict], None]], dict | None]
 
 
+class JobCancelled(Exception):
+    """Raised by a handler (or the worker) to signal cooperative cancellation.
+
+    Translated by the worker into the terminal `cancelled` state — never retried.
+    """
+
+
 class Worker:
     def __init__(
         self,
@@ -50,6 +57,10 @@ class Worker:
 
     def register(self, kind: str, fn: Handler) -> None:
         self._handlers[kind] = fn
+
+    def is_cancelled(self, job_id: int) -> bool:
+        """Handlers poll this at checkpoints to support cooperative cancellation."""
+        return self.job_store.is_cancel_requested(job_id)
 
     def start(self) -> None:
         if self._poll_thread is not None:
@@ -111,6 +122,9 @@ class Worker:
         try:
             job_id = job["id"]
             kind = job["kind"]
+            if self.job_store.is_cancel_requested(job_id):
+                self.job_store.mark_cancelled(job_id)
+                return
             handler = self._handlers.get(kind)
             if handler is None:
                 # Unknown kind is a permanent failure: a worker without the
@@ -127,9 +141,25 @@ class Worker:
 
             try:
                 result = handler(payload, progress_cb)
+            except JobCancelled:
+                log.info("Job %s (%s) cancelled cooperatively", job_id, kind)
+                self.job_store.mark_cancelled(job_id)
+                return
             except Exception as exc:
+                if self.job_store.is_cancel_requested(job_id):
+                    log.info(
+                        "Job %s (%s) failed after cancel request -> cancelled",
+                        job_id,
+                        kind,
+                    )
+                    self.job_store.mark_cancelled(job_id)
+                    return
                 log.exception("Handler %s failed for job %s", kind, job_id)
                 self.job_store.mark_failed(job_id, f"{type(exc).__name__}: {exc}")
+                return
+
+            if self.job_store.is_cancel_requested(job_id):
+                self.job_store.mark_cancelled(job_id)
                 return
             self.job_store.mark_succeeded(job_id, result if isinstance(result, dict) else None)
         finally:

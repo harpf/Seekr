@@ -1,10 +1,13 @@
 import sqlite3
+import threading
+import time
 from datetime import UTC, datetime
 
 import pytest
 
 from document_search.index.sqlite_store import SqliteStore
 from document_search.services.job_store import JobStore
+from document_search.services.job_worker import JobCancelled, Worker
 
 
 @pytest.fixture
@@ -169,3 +172,68 @@ def test_re_enqueue_rejects_active_job(store):
     src = js.enqueue("demo", {})
     js.claim_next()
     assert js.re_enqueue(src) is None
+
+
+@pytest.fixture
+def worker_setup(tmp_path):
+    store = SqliteStore(tmp_path / "w.db")
+    js = JobStore(store)
+    worker = Worker(js, max_concurrent=2, poll_interval_s=0.01)
+    yield store, js, worker
+    worker.stop()
+
+
+def test_handler_polling_cancel_flag_results_in_cancelled(worker_setup):
+    store, js, worker = worker_setup
+    entered = threading.Event()
+
+    @worker.handler("loopy")
+    def loopy(payload, progress_cb):
+        job_id = payload["job_id"]
+        entered.set()
+        for i in range(10_000):
+            if worker.is_cancelled(job_id):
+                raise JobCancelled()
+            progress_cb({"i": i})
+            time.sleep(0.005)
+        return {"completed": True}
+
+    job_id = js.enqueue("loopy", {})
+    js.conn.execute(
+        "UPDATE jobs SET payload_json=? WHERE id=?",
+        (f'{{"job_id": {job_id}}}', job_id),
+    )
+    js.conn.commit()
+
+    worker.tick()
+    assert entered.wait(timeout=2.0)
+    assert js.request_cancel(job_id) == "requested"
+    worker.wait_until_idle(timeout=3.0)
+
+    job = js.get(job_id)
+    assert job["state"] == "cancelled", job
+    assert job["retry_count"] == 0
+
+
+def test_jobcancelled_not_retried_even_with_retries(worker_setup):
+    store, js, worker = worker_setup
+
+    @worker.handler("givesup")
+    def givesup(payload, progress_cb):
+        raise JobCancelled()
+
+    job_id = js.enqueue("givesup", {}, max_retries=5)
+    worker.tick()
+    worker.wait_until_idle(timeout=2.0)
+    job = js.get(job_id)
+    assert job["state"] == "cancelled"
+    assert job["retry_count"] == 0
+
+
+def test_is_cancelled_reflects_store(worker_setup):
+    store, js, worker = worker_setup
+    job_id = js.enqueue("demo", {})
+    js.claim_next()
+    assert worker.is_cancelled(job_id) is False
+    js.request_cancel(job_id)
+    assert worker.is_cancelled(job_id) is True
