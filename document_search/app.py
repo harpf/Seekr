@@ -623,6 +623,35 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             _thread_local.initialized = True
         return _thread_local.db
 
+    import logging as _logging
+    _audit_log = _logging.getLogger("seekr.audit")
+
+    def _client_ip(request: Request | None) -> str | None:
+        if request is None or request.client is None:
+            return None
+        return request.client.host
+
+    def _audit(
+        actor_user_id: int | None,
+        action: str,
+        target_type: str | None = None,
+        target_id: str | int | None = None,
+        detail: dict | None = None,
+        request: Request | None = None,
+    ) -> None:
+        """Best-effort audit write. Never raises into the calling route."""
+        try:
+            store().record_audit(
+                actor_user_id=actor_user_id,
+                action=action,
+                target_type=target_type,
+                target_id=target_id,
+                detail=detail,
+                ip=_client_ip(request),
+            )
+        except Exception:
+            _audit_log.exception("Failed to write audit row for action=%s", action)
+
     def load_effective_config() -> AppConfig:
         if config_path.exists():
             return load_config(config_path)
