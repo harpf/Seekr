@@ -185,3 +185,95 @@ def test_list_document_acl_returns_principal_details(store):
     editor = next(e for e in entries if e["principal_id"] == gid)
     assert editor["display_name"] == "Editors"
     assert all("password_hash" not in e for e in entries)
+
+
+from document_search.services.acl_service import can_write
+
+
+def _doc_with_owner(store, owner_principal_id, path="/d/owned.pdf"):
+    now = datetime.now(tz=UTC).isoformat()
+    cur = store.conn.execute(
+        "INSERT INTO documents(path, filename, extension, file_size, modified_at, "
+        "sha256, indexed_at, status, owner_principal_id) VALUES(?,?,?,?,?,?,?,?,?)",
+        (path, Path(path).name, ".pdf", 1, now, "hO", now, "ok", owner_principal_id),
+    )
+    store.conn.commit()
+    return cur.lastrowid
+
+
+def test_owner_can_write(store):
+    alice = store.create_user("alice", "pw")
+    alice_p = store.conn.execute(
+        "SELECT principal_id FROM users WHERE id=?", (alice,)
+    ).fetchone()["principal_id"]
+    doc = _doc_with_owner(store, alice_p)
+    assert can_write(store.conn, alice, doc) is True
+
+
+def test_non_owner_without_grant_cannot_write_owned_doc(store):
+    alice = store.create_user("alice", "pw")
+    bob = store.create_user("bob", "pw")
+    alice_p = store.conn.execute(
+        "SELECT principal_id FROM users WHERE id=?", (alice,)
+    ).fetchone()["principal_id"]
+    doc = _doc_with_owner(store, alice_p)
+    assert can_write(store.conn, bob, doc) is False
+
+
+def test_direct_write_grant_allows_write(store):
+    alice = store.create_user("alice", "pw")
+    bob = store.create_user("bob", "pw")
+    alice_p = store.conn.execute(
+        "SELECT principal_id FROM users WHERE id=?", (alice,)
+    ).fetchone()["principal_id"]
+    bob_p = store.conn.execute(
+        "SELECT principal_id FROM users WHERE id=?", (bob,)
+    ).fetchone()["principal_id"]
+    doc = _doc_with_owner(store, alice_p)
+    store.grant(doc, bob_p, "write")
+    assert can_write(store.conn, bob, doc) is True
+
+
+def test_group_write_grant_allows_write(store):
+    alice = store.create_user("alice", "pw")
+    bob = store.create_user("bob", "pw")
+    alice_p = store.conn.execute(
+        "SELECT principal_id FROM users WHERE id=?", (alice,)
+    ).fetchone()["principal_id"]
+    doc = _doc_with_owner(store, alice_p)
+    gid = store.create_group("editors")
+    store.add_user_to_group(bob, gid)
+    store.grant(doc, gid, "write")
+    assert can_write(store.conn, bob, doc) is True
+
+
+def test_read_grant_does_not_allow_write(store):
+    alice = store.create_user("alice", "pw")
+    bob = store.create_user("bob", "pw")
+    alice_p = store.conn.execute(
+        "SELECT principal_id FROM users WHERE id=?", (alice,)
+    ).fetchone()["principal_id"]
+    bob_p = store.conn.execute(
+        "SELECT principal_id FROM users WHERE id=?", (bob,)
+    ).fetchone()["principal_id"]
+    doc = _doc_with_owner(store, alice_p)
+    store.grant(doc, bob_p, "read")
+    assert can_write(store.conn, bob, doc) is False
+
+
+def test_unmanaged_document_is_writable_by_anyone(store):
+    bob = store.create_user("bob", "pw")
+    doc = _insert_doc(store, path="/d/legacy.pdf", sha="hL")
+    assert can_write(store.conn, bob, doc) is True
+
+
+def test_managed_by_write_grant_locks_out_others(store):
+    alice = store.create_user("alice", "pw")
+    bob = store.create_user("bob", "pw")
+    alice_p = store.conn.execute(
+        "SELECT principal_id FROM users WHERE id=?", (alice,)
+    ).fetchone()["principal_id"]
+    doc = _insert_doc(store, path="/d/managed.pdf", sha="hM")
+    store.grant(doc, alice_p, "write")
+    assert can_write(store.conn, alice, doc) is True
+    assert can_write(store.conn, bob, doc) is False
