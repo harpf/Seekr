@@ -34,6 +34,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from document_search import observability as _obs
 from document_search.auth import verify_password
 from document_search.config import AppConfig, load_config
 from document_search.crawler import iter_documents
@@ -2626,6 +2627,28 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         if removed == 0:
             raise HTTPException(status_code=404, detail="Saved search not found.")
         return {"status": "deleted", "id": saved_id}
+
+    @app.get("/health")
+    def health() -> dict:
+        """Liveness probe: the process is up and serving. No DB access."""
+        return {"status": "ok", "version": app.version}
+
+    @app.get("/ready")
+    def ready(response: Response) -> dict:
+        """Readiness probe: dependencies (DB connection, worker thread) are healthy."""
+        db_ok = True
+        try:
+            job_store.store.conn.execute("SELECT 1").fetchone()
+        except Exception:
+            db_ok = False
+        worker_ok = worker.is_alive()
+        is_ready = db_ok and worker_ok
+        if not is_ready:
+            response.status_code = 503
+        return {
+            "ready": is_ready,
+            "checks": {"database": db_ok, "worker": worker_ok},
+        }
 
     @app.get("/api/status")
     def api_status(x_auth_token: str | None = Header(default=None)):

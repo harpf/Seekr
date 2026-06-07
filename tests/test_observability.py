@@ -48,3 +48,54 @@ def test_worker_is_alive_reflects_poll_thread(tmp_path):
         worker.stop()
     # Stopped -> not alive.
     assert worker.is_alive() is False
+
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from document_search.app import create_app  # noqa: E402
+
+
+def test_health_returns_200_and_version(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        r = client.get("/health")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["status"] == "ok"
+        assert body["version"] == app.version
+
+
+def test_health_needs_no_auth(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        # No auth header at all — liveness must never require credentials.
+        r = client.get("/health")
+        assert r.status_code == 200, r.text
+
+
+def test_ready_returns_200_when_db_and_worker_ok(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        r = client.get("/ready")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["ready"] is True
+        assert body["checks"]["database"] is True
+        assert body["checks"]["worker"] is True
+
+
+def test_ready_returns_503_when_db_unreachable(tmp_path):
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        # Stop the poll thread first: closing the shared sqlite connection while
+        # the worker is mid-`execute` on it triggers a native crash on Windows.
+        # Stopping the worker also makes worker.is_alive() False, but the
+        # assertion below targets the database check specifically.
+        app.state.worker.stop(timeout=5.0)
+        # Break the exact connection the /ready route's SELECT 1 runs against.
+        app.state.job_store.store.conn.close()
+        r = client.get("/ready")
+        assert r.status_code == 503, r.text
+        body = r.json()
+        assert body["ready"] is False
+        assert body["checks"]["database"] is False
