@@ -5,6 +5,7 @@ import hashlib
 import html
 import ipaddress
 import json
+import logging
 import os
 import posixpath
 import re
@@ -43,8 +44,11 @@ from document_search.extractors.pptx_extractor import PptxTextExtractor
 from document_search.extractors.txt_extractor import TxtTextExtractor
 from document_search.index.search_service import search
 from document_search.index.sqlite_store import SqliteStore
+from document_search.logging_config import configure_logging
 from document_search.services.ai_organizer import AiOrganizer
 from document_search.services.file_service import fingerprint
+
+log = logging.getLogger(__name__)
 
 # Singletons — instantiated once at import time, not on every request.
 _EXTRACTORS: dict[str, object] = {
@@ -69,6 +73,9 @@ _thread_local = threading.local()
 _login_failures: dict[str, list[float]] = {}
 _RATE_LIMIT_MAX = 10       # max failures
 _RATE_LIMIT_WINDOW = 300   # seconds (5 min)
+_SESSION_TTL_S = 60 * 60 * 8     # 8 hours — single source of truth for session lifetime
+_SESSION_MAX = 10_000            # hard cap on tracked sessions (DoS guard)
+_FAILURE_IP_MAX = 10_000         # hard cap on tracked rate-limit IPs (DoS guard)
 
 # Username / password validation.
 _USERNAME_RE = re.compile(r'^[a-zA-Z0-9_\-.]{1,64}$')
@@ -246,6 +253,7 @@ _OPENAPI_TAGS = [
 
 
 def create_app(db_path: str = "./document_index.db") -> FastAPI:
+    configure_logging()
     config_path = Path(os.getenv("DOCUMENT_SEARCH_CONFIG_PATH", "./config.json"))
     ssl_dir = Path(os.getenv("DOCUMENT_SEARCH_SSL_DIR", "/data/ssl"))
     app = FastAPI(
@@ -261,6 +269,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     templates = Jinja2Templates(directory="document_search/web/templates")
     app.mount("/static", StaticFiles(directory="document_search/web/static"), name="static")
     sessions: dict[str, tuple[int, float, str]] = {}
+    app.state.sessions = sessions
     jobs: dict[str, JobState] = {}
     ai_jobs: dict[str, dict] = {}
     upload_root = Path(os.getenv("DOCUMENT_SEARCH_UPLOAD_ROOT", "/documents/uploads"))
@@ -410,6 +419,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         try:
             return json.loads(config_path.read_text(encoding="utf-8")).get("ha_api_keys", [])
         except Exception:
+            log.warning("Failed to parse HA keys from config %s; treating as empty", config_path, exc_info=True)
             return []
 
     def _save_ha_keys(keys: list[dict]) -> None:
@@ -418,7 +428,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             try:
                 raw = json.loads(config_path.read_text(encoding="utf-8"))
             except Exception:
-                pass
+                log.warning("Existing config %s is unreadable; overwriting with fresh keys", config_path, exc_info=True)
         raw["ha_api_keys"] = keys
         config_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
 
@@ -466,10 +476,30 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     app.add_middleware(_SecurityHeaders)
 
     # ── Auth helpers ───────────────────────────────────────────────────
+    def _evict_stale_failures(now: float) -> None:
+        """Drop IP keys whose failures have all aged out, and enforce a cap."""
+        stale = [
+            ip for ip, ts in _login_failures.items()
+            if not any(now - t < _RATE_LIMIT_WINDOW for t in ts)
+        ]
+        for ip in stale:
+            _login_failures.pop(ip, None)
+        if len(_login_failures) > _FAILURE_IP_MAX:
+            overflow = len(_login_failures) - _FAILURE_IP_MAX
+            # Evict the IPs with the oldest most-recent failure first.
+            oldest = sorted(_login_failures.items(), key=lambda kv: max(kv[1]))[:overflow]
+            for ip, _ in oldest:
+                _login_failures.pop(ip, None)
+            log.warning("Rate-limit IP cap %d exceeded; evicted %d oldest IP(s)", _FAILURE_IP_MAX, overflow)
+
     def _check_rate_limit(ip: str) -> None:
         now = time.time()
+        _evict_stale_failures(now)
         recent = [t for t in _login_failures.get(ip, []) if now - t < _RATE_LIMIT_WINDOW]
-        _login_failures[ip] = recent
+        if recent:
+            _login_failures[ip] = recent
+        else:
+            _login_failures.pop(ip, None)
         if len(recent) >= _RATE_LIMIT_MAX:
             raise HTTPException(status_code=429, detail="Too many failed login attempts. Try again in 5 minutes.")
 
@@ -478,6 +508,26 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     def _clear_failures(ip: str) -> None:
         _login_failures.pop(ip, None)
+
+    def _evict_expired_sessions() -> None:
+        """Prune expired sessions and enforce the hard cap.
+
+        Called opportunistically on each login and auth check. O(n) over the
+        sessions dict, but n is bounded by `_SESSION_MAX`.
+        """
+        now = time.time()
+        expired = [t for t, (_uid, issued, _role) in sessions.items() if now - issued > _SESSION_TTL_S]
+        for t in expired:
+            sessions.pop(t, None)
+        if expired:
+            log.info("Evicted %d expired session(s)", len(expired))
+        if len(sessions) > _SESSION_MAX:
+            # Drop the oldest sessions (smallest issued-at) down to the cap.
+            overflow = len(sessions) - _SESSION_MAX
+            oldest = sorted(sessions.items(), key=lambda kv: kv[1][1])[:overflow]
+            for t, _ in oldest:
+                sessions.pop(t, None)
+            log.warning("Session cap %d exceeded; evicted %d oldest session(s)", _SESSION_MAX, overflow)
 
     def _validate_username(username: str) -> None:
         if not _USERNAME_RE.match(username):
@@ -492,19 +542,21 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             raise HTTPException(status_code=400, detail="ollama_url must start with http:// or https://")
 
     def require_user(token: str | None) -> int:
+        _evict_expired_sessions()
         if not token or token not in sessions:
             raise HTTPException(status_code=401, detail="Unauthorized")
         user_id, issued, _role = sessions[token]
-        if time.time() - issued > 60 * 60 * 8:
+        if time.time() - issued > _SESSION_TTL_S:
             sessions.pop(token, None)
             raise HTTPException(status_code=401, detail="Session expired")
         return user_id
 
     def require_admin(token: str | None) -> int:
+        _evict_expired_sessions()
         if not token or token not in sessions:
             raise HTTPException(status_code=401, detail="Unauthorized")
         user_id, issued, role = sessions[token]
-        if time.time() - issued > 60 * 60 * 8:
+        if time.time() - issued > _SESSION_TTL_S:
             sessions.pop(token, None)
             raise HTTPException(status_code=401, detail="Session expired")
         if role != "admin":
@@ -569,6 +621,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     def api_login(req: LoginRequest, request: Request):
         ip = request.client.host if request.client else "unknown"
         _check_rate_limit(ip)
+        _evict_expired_sessions()
         db = store()
         user = db.get_user(req.username)
         if not user or not verify_password(req.password, user["salt"], user["password_hash"]):
@@ -585,7 +638,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         if not x_auth_token or x_auth_token not in sessions:
             raise HTTPException(status_code=401, detail="Unauthorized")
         user_id, issued, role = sessions[x_auth_token]
-        if time.time() - issued > 60 * 60 * 8:
+        if time.time() - issued > _SESSION_TTL_S:
             sessions.pop(x_auth_token, None)
             raise HTTPException(status_code=401, detail="Session expired")
         db = store()
@@ -747,7 +800,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 if not isinstance(raw_source_paths, list):
                     raw_source_paths = []
             except Exception:
-                pass
+                log.warning("Failed to read source_paths from config %s; returning none", config_path, exc_info=True)
         results = []
         for sp in raw_source_paths:
             path = sp.get("path", "")
@@ -849,7 +902,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             if proc.returncode == 0:
                 current_commit = proc.stdout.strip()
         except Exception:
-            pass
+            log.exception("git rev-parse HEAD failed; falling back to GIT_COMMIT env var")
         if not current_commit:
             current_commit = os.getenv("GIT_COMMIT")
 
@@ -1150,7 +1203,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 test_file.unlink()
                 writable = True
             except Exception:
-                pass
+                log.warning("Write test failed for path %s; marking not writable", p, exc_info=True)
         elif exists and p.is_file():
             readable = os.access(p, os.R_OK)
         return {
@@ -1388,7 +1441,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                             "vram_free_mb": int(parts[2]) if parts[2].isdigit() else None,
                         })
         except Exception:
-            pass
+            log.warning("nvidia-smi unavailable or failed; reporting no GPU info", exc_info=True)
 
         # Models from Ollama with sizes
         models: list[dict] = []
@@ -1405,7 +1458,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                         "modified": m.get("modified_at", "")[:10],
                     })
         except Exception:
-            pass
+            log.warning("Could not list models from Ollama at %s; returning empty list", organizer.base_url, exc_info=True)
 
         # Tier recommendation + fit label per model
         recommendation = _recommend_tier(ram_available_gb) if ram_available_gb is not None else None
