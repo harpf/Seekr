@@ -25,6 +25,15 @@ services:
       DOCUMENT_SEARCH_API_KEY: ""
     expose:
       - "8080"
+    healthcheck:
+      # Liveness probe — the app's /health never touches the DB, so a slow or
+      # locked database won't flap the container. Python is already in the image
+      # (no curl dependency required). Use /ready for an external readiness gate.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health', timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     volumes:
       - ./data:/data
       - ./documents:/documents:ro
