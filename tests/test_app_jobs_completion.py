@@ -77,3 +77,38 @@ def test_ai_pull_failure_maps_to_error_status(tmp_path):
         assert final["status"] == "error"
         assert final["result"]["ok"] is False
         assert "manifest" in final["result"]["error"]
+
+
+def test_update_run_persists_job_row(tmp_path, monkeypatch):
+    """Monkeypatch the script existence + subprocess to a fast no-op, then assert
+    a persistent system_update row exists and is finalised."""
+    import document_search.app as appmod
+
+    app = create_app(str(tmp_path / "t.db"))
+
+    class _FakeProc:
+        returncode = 0
+        stdout = "updated ok"
+        stderr = ""
+
+    monkeypatch.setenv("DOCUMENT_SEARCH_UI_UPDATE_ENABLED", "true")
+    monkeypatch.setattr(appmod.Path, "exists", lambda self: True, raising=False)
+    monkeypatch.setattr(appmod.subprocess, "run", lambda *a, **k: _FakeProc())
+
+    with TestClient(app) as client:
+        token = _login(client)
+        r = client.post("/api/update/run", headers={"X-Auth-Token": token})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert "job_id" in body
+
+        final = _wait(
+            client, token, "/api/update/status",
+            until=lambda b: b.get("status") in ("done", "error"),
+        )
+        assert final["status"] == "done"
+
+        js = app.state.job_store
+        rows = js.list_jobs(kind="system_update")
+        assert len(rows) == 1
+        assert rows[0]["state"] == "succeeded"

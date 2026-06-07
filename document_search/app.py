@@ -1067,7 +1067,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     @app.post("/api/update/run")
     def api_run_update(x_auth_token: str | None = Header(default=None)):
-        require_admin(x_auth_token)
+        admin_id = require_admin(x_auth_token)
         if os.getenv("DOCUMENT_SEARCH_UI_UPDATE_ENABLED", "true").lower() != "true":
             raise HTTPException(status_code=403, detail="UI update disabled")
         script = Path("/app/scripts/update.sh")
@@ -1077,6 +1077,18 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         job_id = uuid.uuid4().hex
         _update_job.clear()
         _update_job.update({"job_id": job_id, "status": "running", "stdout": "", "stderr": "", "exit_code": None})
+
+        # Persist a system_update row that is finalised inside _runner BEFORE the
+        # subprocess can replace this process. It is intentionally NOT enqueued on
+        # the worker (no auto-resume); claiming it to 'running' lets the startup
+        # hook record a crash mid-update as interrupted.
+        persistent_id = job_store.enqueue(
+            "system_update",
+            payload={"legacy_job_id": job_id},
+            owner_user_id=admin_id,
+            max_retries=0,
+        )
+        job_store.claim_next(kinds=["system_update"])
 
         def _runner():
             try:
@@ -1092,6 +1104,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                     "stdout": (e.stdout or "")[-4000:] if isinstance(e.stdout, str) else "",
                     "stderr": "Update timed out after 600 seconds.",
                 })
+                job_store.mark_failed_permanent(persistent_id, "update timed out after 600s")
                 return
             _update_job.update({
                 "status": "done" if proc.returncode == 0 else "error",
@@ -1099,14 +1112,39 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 "stdout": proc.stdout[-4000:],
                 "stderr": proc.stderr[-4000:],
             })
+            if proc.returncode == 0:
+                job_store.mark_succeeded(persistent_id, {
+                    "exit_code": proc.returncode,
+                    "stdout": proc.stdout[-4000:],
+                    "stderr": proc.stderr[-4000:],
+                })
+            else:
+                job_store.mark_failed_permanent(
+                    persistent_id, f"update.sh exited {proc.returncode}"
+                )
 
         threading.Thread(target=_runner, daemon=True).start()
-        return {"job_id": job_id, "status": "started"}
+        return {"job_id": job_id, "persistent_id": str(persistent_id), "status": "started"}
 
     @app.get("/api/update/status")
     def api_update_status(x_auth_token: str | None = Header(default=None)):
         require_admin(x_auth_token)
-        return dict(_update_job)
+        if _update_job.get("status") not in (None, "idle"):
+            return dict(_update_job)
+        rows = job_store.list_jobs(kind="system_update", limit=1)
+        if not rows:
+            return dict(_update_job)
+        row = rows[0]
+        state_map = {"succeeded": "done", "failed": "error", "running": "running",
+                     "interrupted": "error", "cancelled": "error", "pending": "running"}
+        result = json.loads(row["result_json"]) if row["result_json"] else {}
+        return {
+            "status": state_map.get(row["state"], row["state"]),
+            "exit_code": result.get("exit_code"),
+            "stdout": result.get("stdout", ""),
+            "stderr": result.get("stderr", row["error_message"] or ""),
+            "persistent_id": str(row["id"]),
+        }
 
     # ── Home Assistant integration ─────────────────────────────────────
 
