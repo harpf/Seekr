@@ -249,31 +249,84 @@ function clearSearch() {
   if (metaEl) metaEl.textContent = '';
   const resultsEl = document.getElementById('results');
   if (resultsEl) resultsEl.innerHTML = '';
+  _searchState = { offset: 0, hasMore: false, total: 0, loading: false };
+  _updateLoadMore();
+}
+
+// ── Pagination state + header-reading fetch helper ─────────────────
+const PAGE_SIZE = 25;
+let _searchState = { offset: 0, hasMore: false, total: 0, loading: false };
+
+function _currentSearchPayload(offset) {
+  return {
+    query: query.value,
+    limit: PAGE_SIZE,
+    offset,
+    filetype: chipFiletype?.values().join(',') || null,
+    path: pathFilter.value || null,
+    block_type: blockType.value || null,
+    modified_from: modifiedFrom.value || null,
+    modified_to: modifiedTo.value || null,
+    tags: chipTagFilter?.values() ?? [],
+  };
+}
+
+async function _fetchSearchPage(offset) {
+  const res = await fetch('/api/search', {
+    method: 'POST',
+    headers: { 'X-Auth-Token': token ?? '', 'Content-Type': 'application/json' },
+    body: JSON.stringify(_currentSearchPayload(offset)),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try {
+      const detail = JSON.parse(text)?.detail;
+      if (Array.isArray(detail)) {
+        msg = detail.map(e => e.msg || String(e)).join('; ');
+      } else {
+        msg = String(detail ?? text);
+      }
+    } catch (_) {}
+    throw new Error(msg || `Request failed (${res.status})`);
+  }
+  const docs = await res.json();
+  const total = Number(res.headers.get('X-Total-Count') ?? docs.length);
+  const hasMore = (res.headers.get('X-Has-More') ?? '').toLowerCase() === 'true';
+  const nextOffset = Number(res.headers.get('X-Next-Offset') ?? (offset + docs.length));
+  return { docs, total, hasMore, nextOffset };
+}
+
+function _updateLoadMore() {
+  const wrap = document.getElementById('loadMoreWrap');
+  const btn = document.getElementById('loadMoreBtn');
+  if (!wrap) return;
+  wrap.style.display = _searchState.hasMore ? '' : 'none';
+  if (btn) {
+    btn.disabled = _searchState.loading;
+    btn.textContent = _searchState.loading ? 'Loading…' : 'Load more';
+  }
 }
 
 async function runSearch() {
   const resultsEl = document.getElementById('results');
   try {
-    const payload = {
-      query: query.value, limit: 25,
-      filetype: chipFiletype?.values().join(',') || null,
-      path: pathFilter.value || null,
-      block_type: blockType.value || null,
-      modified_from: modifiedFrom.value || null,
-      modified_to: modifiedTo.value || null,
-      tags: chipTagFilter?.values() ?? [],
-    };
-    const data = await api('/api/search', 'POST', payload);
-    if (payload.query?.trim()) saveRecentSearch(payload.query);
+    _searchState.loading = true;
+    _updateLoadMore();
+    const queryStr = query.value;
+    const { docs, total, hasMore, nextOffset } = await _fetchSearchPage(0);
+    if (queryStr?.trim()) saveRecentSearch(queryStr);
+
+    _searchState = { offset: nextOffset, hasMore, total, loading: false };
 
     const metaEl = document.getElementById('resultsMeta');
     if (metaEl) {
-      metaEl.textContent = !data.length
+      metaEl.textContent = !total
         ? ''
-        : data.length === 25 ? '25+ results' : `${data.length} result${data.length !== 1 ? 's' : ''}`;
+        : `${total} result${total !== 1 ? 's' : ''}`;
     }
 
-    if (!data.length) {
+    if (!docs.length) {
       resultsEl.innerHTML = `
         <div class="empty">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -281,12 +334,32 @@ async function runSearch() {
           </svg>
           <p>No results found for this query.</p>
         </div>`;
+      _updateLoadMore();
       return;
     }
 
-    renderResults(data);
+    renderResults(docs, false);
+    _updateLoadMore();
   } catch (e) {
+    _searchState = { offset: 0, hasMore: false, total: 0, loading: false };
+    _updateLoadMore();
     if (resultsEl) resultsEl.textContent = e.message;
+  }
+}
+
+async function loadMoreResults() {
+  if (_searchState.loading || !_searchState.hasMore) return;
+  try {
+    _searchState.loading = true;
+    _updateLoadMore();
+    const { docs, hasMore, nextOffset, total } = await _fetchSearchPage(_searchState.offset);
+    _searchState = { offset: nextOffset, hasMore, total, loading: false };
+    renderResults(docs, true);
+    _updateLoadMore();
+  } catch (e) {
+    _searchState.loading = false;
+    _updateLoadMore();
+    showToast(e.message, 'err');
   }
 }
 
@@ -325,11 +398,13 @@ function buildHitEl(hit) {
 
 const HITS_SHOW_MAX = 5;
 
-function renderResults(docs) {
+function renderResults(docs, append = false) {
   const el = document.getElementById('results');
   if (!el) return;
-  el.replaceChildren();
-  for (const k in _resultTagChips) delete _resultTagChips[k];
+  if (!append) {
+    el.replaceChildren();
+    for (const k in _resultTagChips) delete _resultTagChips[k];
+  }
 
   docs.forEach(doc => {
     const card = document.createElement('div');
@@ -1926,6 +2001,9 @@ function initSearchPage() {
 
   // Enter to run search
   queryEl.addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
+
+  // Load more pager
+  document.getElementById('loadMoreBtn')?.addEventListener('click', loadMoreResults);
 }
 
 async function bootstrap() {
