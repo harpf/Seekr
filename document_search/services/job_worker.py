@@ -174,3 +174,67 @@ class Worker:
                 self.tick()
             except Exception:
                 log.exception("Worker follow-up tick failed")
+
+
+class Scheduler:
+    """Opt-in periodic enqueuer. Reuses the existing `index_paths` job kind, so
+    the already-registered worker handler runs scheduled re-indexes — no new job
+    kind, no new infrastructure.
+
+    `paths_provider` is called at each tick so config edits (source_paths) take
+    effect without a restart. If it returns an empty list, the tick is a no-op.
+    """
+
+    def __init__(
+        self,
+        job_store: JobStore,
+        paths_provider: Callable[[], list[str]],
+        interval_s: float,
+        owner_user_id: int | None = None,
+    ):
+        self.job_store = job_store
+        self.paths_provider = paths_provider
+        self.interval_s = interval_s
+        self.owner_user_id = owner_user_id
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def tick(self) -> int | None:
+        """Enqueue one `index_paths` job covering all configured paths.
+        Returns the job id, or None if there are no paths."""
+        try:
+            paths = [p for p in (self.paths_provider() or []) if p and p.strip()]
+        except Exception:
+            log.exception("Scheduler paths_provider failed")
+            return None
+        if not paths:
+            return None
+        job_id = self.job_store.enqueue(
+            "index_paths",
+            payload={"paths": paths, "config_path": None},
+            owner_user_id=self.owner_user_id,
+            max_retries=0,
+        )
+        log.info("Scheduler enqueued index_paths job %s for %d path(s)", job_id, len(paths))
+        return job_id
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._loop, name="ReindexScheduler", daemon=True)
+        self._thread.start()
+
+    def stop(self, timeout: float = 5.0) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=timeout)
+            self._thread = None
+
+    def _loop(self) -> None:
+        # Wait one interval before the first run (don't index on every boot).
+        while not self._stop_event.wait(self.interval_s):
+            try:
+                self.tick()
+            except Exception:
+                log.exception("Scheduler tick error")

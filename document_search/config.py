@@ -28,6 +28,7 @@ class AppConfig:
     ignore_hidden: bool = True
     ignore_temp_office_files: bool = True
     follow_symlinks: bool = False
+    scheduled_reindex: int = 0  # minutes between automatic re-index runs; 0 = disabled
     ocr: OcrConfig = field(default_factory=OcrConfig)
 
 

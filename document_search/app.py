@@ -343,13 +343,40 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     app.state.job_store = job_store
     app.state.worker = worker
 
+    def _scheduled_paths() -> list[str]:
+        try:
+            raw = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+        except Exception:
+            return []
+        return [sp["path"] for sp in raw.get("source_paths", []) if sp.get("path")]
+
+    from document_search.services.job_worker import Scheduler
+    _reindex_minutes = 0
+    try:
+        if config_path.exists():
+            _reindex_minutes = int(
+                json.loads(config_path.read_text(encoding="utf-8")).get("scheduled_reindex", 0)
+            )
+    except Exception:
+        _reindex_minutes = 0
+    scheduler = (
+        Scheduler(job_store, _scheduled_paths, interval_s=_reindex_minutes * 60, owner_user_id=None)
+        if _reindex_minutes > 0
+        else None
+    )
+    app.state.scheduler = scheduler
+
     @app.on_event("startup")
     def _start_worker() -> None:
         job_store.mark_interrupted_running_jobs()
         worker.start()
+        if scheduler is not None:
+            scheduler.start()
 
     @app.on_event("shutdown")
     def _stop_worker() -> None:
+        if scheduler is not None:
+            scheduler.stop(timeout=5.0)
         worker.stop(timeout=5.0)
 
     @worker.handler("index_paths")
