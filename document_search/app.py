@@ -411,6 +411,26 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             return load_config(config_path)
         return AppConfig()
 
+    # ── Error sanitisation ─────────────────────────────────────────────
+    def _client_error(
+        public_message: str,
+        exc: BaseException,
+        status_code: int = 400,
+        *,
+        server_error: bool = False,
+    ) -> HTTPException:
+        """Log the real exception server-side and return a generic HTTPException.
+
+        Never echo `str(exc)` to the client — it can leak filesystem paths,
+        SQL constraint text, or stack details. `server_error=True` uses
+        log.exception (full traceback) for 5xx; otherwise log.warning.
+        """
+        if server_error:
+            log.exception("%s", public_message)
+        else:
+            log.warning("%s: %s", public_message, exc)
+        return HTTPException(status_code=status_code, detail=public_message)
+
     # ── HA key helpers ─────────────────────────────────────────────────
 
     def _load_ha_keys() -> list[dict]:
@@ -1146,7 +1166,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             user_id = db.create_user(req.username, req.password, req.role)
             return {"id": user_id, "username": req.username, "role": req.role}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise _client_error("Could not create user (it may already exist).", e, 400)
 
     @app.put("/api/users/{user_id}")
     def api_update_user(user_id: int, req: UserUpdateRequest, x_auth_token: str | None = Header(default=None)):
@@ -1377,7 +1397,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         except ImportError:
             raise HTTPException(status_code=501, detail="cryptography package not installed")
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise _client_error("Certificate generation failed.", e, 500, server_error=True)
 
     # ── AI / Ollama ────────────────────────────────────────────────────
 
