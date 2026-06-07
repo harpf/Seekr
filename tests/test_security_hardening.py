@@ -1,3 +1,4 @@
+import io
 from pathlib import Path
 
 import pytest
@@ -47,3 +48,43 @@ def test_dockerfile_runs_as_non_root():
     user_idx = text.index("USER seekr")
     cmd_idx = text.rindex("CMD")
     assert user_idx < cmd_idx, "USER must precede CMD"
+
+
+def _upload(client, token, filename, content: bytes, subpath=""):
+    return client.post(
+        "/api/upload",
+        headers={"X-Auth-Token": token},
+        files={"file": (filename, io.BytesIO(content), "application/octet-stream")},
+        data={"target_subpath": subpath},
+    )
+
+
+def test_upload_rejects_exe_renamed_to_pdf(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOCUMENT_SEARCH_UPLOAD_ROOT", str(tmp_path / "uploads"))
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = _login(client)
+        exe_bytes = b"MZ\x90\x00\x03\x00\x00\x00" + b"\x00" * 64
+        r = _upload(client, token, "report.pdf", exe_bytes)
+        assert r.status_code == 400, r.text
+        assert "match" in r.json()["detail"].lower() or "content" in r.json()["detail"].lower()
+
+
+def test_upload_rejects_traversal_subpath(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOCUMENT_SEARCH_UPLOAD_ROOT", str(tmp_path / "uploads"))
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = _login(client)
+        r = _upload(client, token, "note.txt", b"hello text", subpath="../../etc")
+        assert r.status_code == 400, r.text
+        assert "subpath" in r.json()["detail"].lower() or "invalid" in r.json()["detail"].lower()
+
+
+def test_upload_accepts_real_text_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOCUMENT_SEARCH_UPLOAD_ROOT", str(tmp_path / "uploads"))
+    app = create_app(str(tmp_path / "t.db"))
+    with TestClient(app) as client:
+        token = _login(client)
+        r = _upload(client, token, "note.txt", b"a genuine plain text note\n")
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "uploaded"

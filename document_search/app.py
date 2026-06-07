@@ -739,6 +739,11 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         metadata_json: str = Form(default="{}"),
     ):
         user_id = require_user(x_auth_token)
+        from document_search.services.upload_validation import (
+            is_within,
+            magic_matches_extension,
+            reject_traversal,
+        )
         safe_name = Path(file.filename or "upload.bin").name
         ext = Path(safe_name).suffix.lower()
         allowed = {".pdf", ".docx", ".pptx", ".txt", ".md", ".doc", ".ppt"}
@@ -748,8 +753,10 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         if len(metadata_json) > 8192:
             raise HTTPException(status_code=400, detail="metadata_json exceeds 8 KB limit")
 
+        if reject_traversal(target_subpath):
+            raise HTTPException(status_code=400, detail="Invalid target_subpath")
         target = (upload_root / target_subpath).resolve()
-        if upload_root.resolve() not in target.parents and target != upload_root.resolve():
+        if not is_within(upload_root, target):
             raise HTTPException(status_code=400, detail="Invalid target_subpath")
         target.mkdir(parents=True, exist_ok=True)
 
@@ -758,6 +765,14 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         max_bytes = cfg.max_file_size_mb * 1024 * 1024
         if len(content) > max_bytes:
             raise HTTPException(status_code=413, detail=f"File exceeds {cfg.max_file_size_mb} MB limit")
+
+        ok, reason = magic_matches_extension(content, ext)
+        if not ok:
+            log.warning("Rejected upload %r: %s", safe_name, reason)
+            raise HTTPException(
+                status_code=400,
+                detail="File content does not match its extension.",
+            )
 
         digest = hashlib.sha256(content).hexdigest()[:8]
         out = target / f"{Path(safe_name).stem}_{digest}{ext}"
