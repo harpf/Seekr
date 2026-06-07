@@ -862,6 +862,10 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     @app.get("/api/folders")
     def api_folders(x_auth_token: str | None = Header(default=None)):
+        # Returns filesystem directory names under upload_root, not index documents.
+        # The ACL model governs documents (document_id), not raw folders, so there is
+        # no visible_document_ids_subquery to apply here. Auth gate only. See ACL
+        # Enforcement Completion plan, Task 8.
         require_user(x_auth_token)
         root = str(upload_root)
         if not os.path.isdir(root):
@@ -879,6 +883,9 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     @app.get("/api/source-folders")
     def api_source_folders(x_auth_token: str | None = Header(default=None)):
+        # Filesystem listing of configured source_paths (admin-curated config), not
+        # index documents. No document_id is returned, so the ACL document filter
+        # does not apply. Auth gate only. See ACL Enforcement Completion plan, Task 8.
         require_user(x_auth_token)
         raw_source_paths: list[dict] = []
         if config_path.exists():
