@@ -219,3 +219,54 @@ def test_delete_documents_removes_index_rows(store):
 
 def test_delete_documents_empty_list_is_noop(store):
     assert store.delete_documents([]) == 0
+
+
+def test_legacy_db_without_content_hash_migrates_cleanly(tmp_path):
+    """Regression: opening a pre-content_hash database must add the column AND its
+    index without error. The index used to live in the _init_schema executescript,
+    which ran before the ALTER migration, so on a legacy DB the CREATE INDEX failed
+    with 'no such column: content_hash' before the column was ever added."""
+    import sqlite3
+
+    db_path = tmp_path / "legacy.db"
+    # A minimal legacy `documents` table — note: NO content_hash column.
+    legacy = sqlite3.connect(db_path)
+    legacy.execute(
+        """
+        CREATE TABLE documents (
+          id INTEGER PRIMARY KEY,
+          path TEXT NOT NULL UNIQUE,
+          filename TEXT NOT NULL,
+          extension TEXT,
+          file_size INTEGER,
+          modified_at TEXT,
+          sha256 TEXT NOT NULL,
+          indexed_at TEXT,
+          status TEXT
+        )
+        """
+    )
+    legacy.execute(
+        "INSERT INTO documents(path, filename, extension, file_size, modified_at, "
+        "sha256, indexed_at, status) VALUES(?,?,?,?,?,?,?,?)",
+        ("/d/legacy.txt", "legacy.txt", ".txt", 10, "2020-01-01T00:00:00+00:00",
+         "sha-legacy", "2020-01-01T00:00:00+00:00", "ok"),
+    )
+    legacy.commit()
+    legacy.close()
+
+    # Opening via SqliteStore must NOT raise and must add the column + index.
+    store = SqliteStore(db_path)
+    cols = {c[1] for c in store.conn.execute("PRAGMA table_info(documents)").fetchall()}
+    assert "content_hash" in cols
+    idx = {
+        r[0]
+        for r in store.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_docs_content_hash'"
+        ).fetchall()
+    }
+    assert idx == {"idx_docs_content_hash"}
+    # The pre-existing row survives the migration.
+    assert store.conn.execute(
+        "SELECT COUNT(*) FROM documents WHERE path='/d/legacy.txt'"
+    ).fetchone()[0] == 1

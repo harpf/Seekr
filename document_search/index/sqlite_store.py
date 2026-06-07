@@ -109,7 +109,6 @@ class SqliteStore:
             );
             CREATE INDEX IF NOT EXISTS idx_docs_modified_at  ON documents(modified_at);
             CREATE INDEX IF NOT EXISTS idx_docs_sha256       ON documents(sha256);
-            CREATE INDEX IF NOT EXISTS idx_docs_content_hash ON documents(content_hash);
             CREATE INDEX IF NOT EXISTS idx_blocks_doc_id     ON content_blocks(document_id);
             CREATE INDEX IF NOT EXISTS idx_doc_tags_doc_id   ON document_tags(document_id);
             CREATE INDEX IF NOT EXISTS idx_doc_tags_tag_id   ON document_tags(tag_id);
@@ -215,9 +214,19 @@ class SqliteStore:
             self.conn.commit()
         except Exception:
             pass
-        # Migration: add content_hash column for near-duplicate detection
+        # Migration: add content_hash column for near-duplicate detection.
+        # The matching index lives here (not in the _init_schema executescript)
+        # because on a legacy DB the column doesn't exist until this ALTER runs —
+        # creating the index in the executescript would fail before the migration.
         try:
             self.conn.execute("ALTER TABLE documents ADD COLUMN content_hash TEXT")
+            self.conn.commit()
+        except Exception:
+            pass
+        try:
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_docs_content_hash ON documents(content_hash)"
+            )
             self.conn.commit()
         except Exception:
             pass
