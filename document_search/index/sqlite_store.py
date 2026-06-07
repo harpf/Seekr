@@ -208,6 +208,21 @@ class SqliteStore:
             CREATE INDEX IF NOT EXISTS idx_ai_decisions_kind ON ai_decisions(kind);
             CREATE INDEX IF NOT EXISTS idx_ai_decisions_doc  ON ai_decisions(document_id);
             CREATE INDEX IF NOT EXISTS idx_ai_decisions_user ON ai_decisions(user_id);
+            CREATE TABLE IF NOT EXISTS audit_log (
+              id INTEGER PRIMARY KEY,
+              actor_user_id INTEGER,
+              action TEXT NOT NULL,
+              target_type TEXT,
+              target_id TEXT,
+              detail_json TEXT,
+              ip TEXT,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_actor   ON audit_log(actor_user_id);
+            CREATE INDEX IF NOT EXISTS idx_audit_action  ON audit_log(action);
+            CREATE INDEX IF NOT EXISTS idx_audit_target  ON audit_log(target_type, target_id);
+            CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
             """
         )
         # Migration: add role column for existing databases
