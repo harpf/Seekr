@@ -258,6 +258,12 @@ class TagsRequest(BaseModel):
     tags: list[str]
 
 
+class SavedSearchRequest(BaseModel):
+    name: str
+    query: str = ""
+    filters: dict = Field(default_factory=dict)
+
+
 class GroupCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     display_name: str | None = None
@@ -2168,6 +2174,34 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         user_id = require_user(x_auth_token)
         removed = store().clear_search_history(user_id)
         return {"status": "ok", "removed": removed}
+
+    @app.get("/api/search/saved")
+    def api_list_saved_searches(x_auth_token: str | None = Header(default=None)):
+        user_id = require_user(x_auth_token)
+        return store().list_saved_searches(user_id)
+
+    @app.post("/api/search/saved")
+    def api_create_saved_search(req: SavedSearchRequest, x_auth_token: str | None = Header(default=None)):
+        user_id = require_user(x_auth_token)
+        name = req.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Saved search name must not be blank.")
+        try:
+            saved_id = store().create_saved_search(user_id, name, req.query, req.filters)
+        except sqlite3.IntegrityError as e:
+            raise HTTPException(
+                status_code=409,
+                detail=f"A saved search named '{name}' already exists.",
+            ) from e
+        return {"id": saved_id, "name": name, "query": req.query, "filters": req.filters}
+
+    @app.delete("/api/search/saved/{saved_id}")
+    def api_delete_saved_search(saved_id: int, x_auth_token: str | None = Header(default=None)):
+        user_id = require_user(x_auth_token)
+        removed = store().delete_saved_search(user_id, saved_id)
+        if removed == 0:
+            raise HTTPException(status_code=404, detail="Saved search not found.")
+        return {"status": "deleted", "id": saved_id}
 
     @app.get("/api/status")
     def api_status(x_auth_token: str | None = Header(default=None)):
