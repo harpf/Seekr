@@ -326,7 +326,6 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     sessions: dict[str, tuple[int, float, str]] = {}
     app.state.sessions = sessions
     jobs: dict[str, JobState] = {}
-    ai_jobs: dict[str, dict] = {}
     upload_root = Path(os.getenv("DOCUMENT_SEARCH_UPLOAD_ROOT", "/documents/uploads"))
     organizer = AiOrganizer()
 
@@ -446,6 +445,25 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             "done": state["done"],
             "results": state["results"],
         }
+
+    @worker.handler("ai_pull")
+    def _handle_ai_pull(payload: dict, progress_cb):
+        model = payload.get("model")
+        last = {"ok": False}
+        for evt in organizer.pull_model_stream(model):
+            if "ok" in evt:
+                last = evt
+                break
+            progress_cb({
+                "status": evt.get("status", "pulling"),
+                "completed": evt.get("completed", 0),
+                "total": evt.get("total", 0),
+            })
+        if not last.get("ok"):
+            return {"ok": False, "model": model or organizer.model,
+                    "error": last.get("error", "pull failed")}
+        return {"ok": True, "model": last.get("model") or model or organizer.model,
+                "status": last.get("status", "success")}
 
     def store() -> SqliteStore:
         """Return a per-thread SqliteStore, creating it once on first use."""
@@ -1656,17 +1674,15 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     @app.post("/api/ai/models/pull")
     def api_ai_pull_model(req: PullModelRequest, x_auth_token: str | None = Header(default=None)):
-        require_admin(x_auth_token)
-        job_id = uuid.uuid4().hex
-        ai_jobs[job_id] = {"status": "pulling", "model": req.model or organizer.model, "result": None}
-
-        def runner():
-            result = organizer.pull_model(req.model)
-            ai_jobs[job_id]["status"] = "done" if result["ok"] else "error"
-            ai_jobs[job_id]["result"] = result
-
-        threading.Thread(target=runner, daemon=True).start()
-        return {"job_id": job_id, "model": req.model or organizer.model}
+        admin_id = require_admin(x_auth_token)
+        model = req.model or organizer.model
+        job_id = job_store.enqueue(
+            "ai_pull",
+            payload={"model": req.model},
+            owner_user_id=admin_id,
+            max_retries=0,
+        )
+        return {"job_id": str(job_id), "model": model}
 
     @app.get("/api/ai/system-info")
     def api_ai_system_info(x_auth_token: str | None = Header(default=None)):
@@ -1763,7 +1779,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         if job_id.isdigit():
             jid = int(job_id)
             job = job_store.get(jid)
-            if job and job["kind"] in ("ai_suggest_structure", "ai_reorganize"):
+            if job and job["kind"] in ("ai_suggest_structure", "ai_reorganize", "ai_pull"):
                 user_row = store().get_user_by_id(user_id)
                 is_admin = bool(user_row) and user_row["role"] == "admin"
                 if not is_admin and job["owner_user_id"] != user_id:
@@ -1775,10 +1791,21 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                     "succeeded": "finished",
                     "failed": "failed",
                     "interrupted": "interrupted",
+                    "cancelled": "cancelled",
                 }
                 response: dict = {"status": state_to_status.get(job["state"], job["state"])}
                 progress = json.loads(job["progress_json"]) if job["progress_json"] else {}
                 result   = json.loads(job["result_json"])   if job["result_json"]   else None
+                if job["kind"] == "ai_pull":
+                    payload = json.loads(job["payload_json"]) if job["payload_json"] else {}
+                    model = (result or {}).get("model") or payload.get("model") or organizer.model
+                    if job["state"] in ("pending", "running"):
+                        pull_status = "pulling"
+                    elif job["state"] == "succeeded" and (result or {}).get("ok"):
+                        pull_status = "done"
+                    else:
+                        pull_status = "error"
+                    return {"status": pull_status, "model": model, "result": result, "progress": progress}
                 if job["kind"] == "ai_suggest_structure":
                     response["result"] = result if job["state"] == "succeeded" else None
                 else:  # ai_reorganize
@@ -1789,11 +1816,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 if job["state"] == "failed":
                     response["error"] = job["error_message"]
                 return response
-        # Fallback: in-memory ai_jobs (e.g. ai_pull_model still lives here)
-        legacy = ai_jobs.get(job_id)
-        if not legacy:
-            raise HTTPException(status_code=404, detail="Job not found")
-        return legacy
+        raise HTTPException(status_code=404, detail="Job not found")
 
     @app.post("/api/ai/reorganize/start")
     def api_ai_reorganize_start(

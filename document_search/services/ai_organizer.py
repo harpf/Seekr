@@ -199,6 +199,43 @@ class AiOrganizer:
         except Exception as e:
             return {"ok": False, "model": name, "error": type(e).__name__}
 
+    def pull_model_stream(self, model: str | None = None):
+        """Generator streaming Ollama /api/pull progress.
+
+        Yields the dicts Ollama emits (e.g. {"status": "downloading", "completed": N, "total": M}),
+        then a final terminal dict {"ok": True/False, "model": name, ...}.
+        """
+        name = model or self.model
+        payload = json.dumps({"name": name, "stream": True}).encode()
+        try:
+            req = urllib.request.Request(
+                f"{self.base_url}/api/pull",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            last_status = "pulling"
+            with urllib.request.urlopen(req, timeout=600) as resp:
+                for raw in resp:
+                    line = raw.decode().strip()
+                    if not line:
+                        continue
+                    try:
+                        evt = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if evt.get("status"):
+                        last_status = evt["status"]
+                    yield evt
+                    if evt.get("error"):
+                        yield {"ok": False, "model": name, "error": evt["error"]}
+                        return
+            yield {"ok": True, "model": name, "status": last_status}
+        except urllib.error.URLError as e:
+            yield {"ok": False, "model": name, "error": str(e)}
+        except Exception as e:  # noqa: BLE001
+            yield {"ok": False, "model": name, "error": f"{type(e).__name__}: {e}"}
+
     def suggest(
         self,
         *,
