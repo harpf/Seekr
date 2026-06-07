@@ -998,7 +998,20 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         _update_job.update({"job_id": job_id, "status": "running", "stdout": "", "stderr": "", "exit_code": None})
 
         def _runner():
-            proc = subprocess.run(["/bin/sh", str(script)], capture_output=True, text=True, check=False)
+            try:
+                proc = subprocess.run(
+                    ["/bin/sh", str(script)],
+                    capture_output=True, text=True, check=False, timeout=600,
+                )
+            except subprocess.TimeoutExpired as e:
+                log.warning("Update script timed out after 600s")
+                _update_job.update({
+                    "status": "error",
+                    "exit_code": None,
+                    "stdout": (e.stdout or "")[-4000:] if isinstance(e.stdout, str) else "",
+                    "stderr": "Update timed out after 600 seconds.",
+                })
+                return
             _update_job.update({
                 "status": "done" if proc.returncode == 0 else "error",
                 "exit_code": proc.returncode,

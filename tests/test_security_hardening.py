@@ -1,3 +1,4 @@
+import inspect
 import io
 import re
 from pathlib import Path
@@ -184,3 +185,32 @@ def test_mount_rejects_bad_remote_path(tmp_path, monkeypatch):
             },
         )
         assert r.status_code == 400, r.text
+
+
+def test_all_subprocess_run_calls_have_timeout():
+    """Every subprocess.run(...) in app.py must pass a timeout= kwarg so a hung
+    child cannot block a worker thread forever."""
+    src = inspect.getsource(appmod)
+    idx = 0
+    offenders = []
+    needle = "subprocess.run("
+    while True:
+        start = src.find(needle, idx)
+        if start == -1:
+            break
+        depth = 0
+        i = start + len(needle) - 1  # position of the '('
+        end = None
+        for j in range(i, len(src)):
+            if src[j] == "(":
+                depth += 1
+            elif src[j] == ")":
+                depth -= 1
+                if depth == 0:
+                    end = j
+                    break
+        call_text = src[start: (end + 1) if end else len(src)]
+        if "timeout=" not in call_text:
+            offenders.append(call_text[:80])
+        idx = (end + 1) if end else start + len(needle)
+    assert not offenders, f"subprocess.run without timeout: {offenders}"
