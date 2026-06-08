@@ -102,7 +102,7 @@
               <div class="card-titles"><h2>Storage</h2><p>Database file location</p></div>
             </div>
             <div class="card-body">
-              <div class="f-grid" style="grid-template-columns:1fr;">
+              <div class="f-grid f-grid-1">
                 <div class="f-col">
                   <label class="f-label" for="cfgDb">Database path</label>
                   <input id="cfgDb" placeholder="/data/document_index.db" />
@@ -172,7 +172,7 @@
             </div>
             <div class="card-body">
               <div id="pathList" class="path-list"></div>
-              <div class="f-grid gap-top" style="grid-template-columns:1fr 1fr auto;">
+              <div class="f-grid gap-top f-grid-11a">
                 <div class="f-col">
                   <label class="f-label" for="newPathValue">Path</label>
                   <input id="newPathValue" placeholder="/documents or //server/share" />
@@ -211,12 +211,12 @@
               <div class="card-titles"><h2>Network Path Test</h2><p>Verify that a path is accessible from the server</p></div>
             </div>
             <div class="card-body">
-              <div class="f-grid" style="grid-template-columns:1fr auto;">
+              <div class="f-grid f-grid-1a">
                 <div class="f-col">
                   <label class="f-label" for="testPathInput">Path to test</label>
                   <input id="testPathInput" placeholder="/documents or //fileserver/share" />
                 </div>
-                <div class="f-col" style="justify-content:flex-end;">
+                <div class="f-col col-end">
                   <label class="f-label">&nbsp;</label>
                   <button class="btn btn-p" id="testPathBtn" onclick="runPathTest()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
@@ -343,7 +343,7 @@
             </div>
             <div class="card-body">
               <input type="hidden" id="changePwUserId" />
-              <div class="f-grid" style="grid-template-columns:1fr;">
+              <div class="f-grid f-grid-1">
                 <div class="f-col">
                   <label class="f-label" for="changePwInput">New password</label>
                   <input id="changePwInput" type="password" placeholder="••••••••" autocomplete="new-password" />
@@ -370,7 +370,7 @@
             <div class="card-body">
               <div id="groupTable" class="u-table-wrap"></div>
               <p id="groupsResult" class="feedback"></p>
-              <div class="f-grid" style="margin-top:12px;">
+              <div class="f-grid mt-12">
                 <div class="f-col">
                   <label class="f-label" for="newGroupName">Group name</label>
                   <input id="newGroupName" placeholder="editors" autocomplete="off" />
@@ -397,12 +397,12 @@
             <div class="card-body">
               <input type="hidden" id="selectedGroupId" />
               <div id="groupMemberTable" class="u-table-wrap"></div>
-              <div class="f-grid" style="margin-top:12px; grid-template-columns:1fr auto;">
+              <div class="f-grid mt-12 f-grid-1a">
                 <div class="f-col">
                   <label class="f-label" for="addMemberSelect">Add user</label>
                   <select id="addMemberSelect"></select>
                 </div>
-                <div class="f-col" style="align-self:end;">
+                <div class="f-col self-end">
                   <button class="btn btn-p" onclick="addGroupMember()">Add</button>
                 </div>
               </div>
@@ -416,17 +416,17 @@
               <div class="card-titles"><h2>Document Access</h2><p>Grant or revoke read/write on a single document</p></div>
             </div>
             <div class="card-body">
-              <div class="f-grid" style="grid-template-columns:1fr auto;">
+              <div class="f-grid f-grid-1a">
                 <div class="f-col">
                   <label class="f-label" for="aclDocId">Document ID</label>
                   <input id="aclDocId" type="number" placeholder="e.g. 42" />
                 </div>
-                <div class="f-col" style="align-self:end;">
+                <div class="f-col self-end">
                   <button class="btn btn-g" onclick="loadDocumentAcl()">Load ACL</button>
                 </div>
               </div>
-              <div id="docAclTable" class="u-table-wrap" style="margin-top:12px;"></div>
-              <div class="f-grid" style="margin-top:12px; grid-template-columns:1fr 1fr auto;">
+              <div id="docAclTable" class="u-table-wrap mt-12"></div>
+              <div class="f-grid mt-12 f-grid-11a">
                 <div class="f-col">
                   <label class="f-label" for="aclPrincipalSelect">Principal</label>
                   <select id="aclPrincipalSelect"></select>
@@ -438,7 +438,7 @@
                     <option value="write">Write</option>
                   </select>
                 </div>
-                <div class="f-col" style="align-self:end;">
+                <div class="f-col self-end">
                   <button class="btn btn-p" onclick="grantDocumentAcl()">Grant</button>
                 </div>
               </div>
@@ -486,7 +486,7 @@
                 </div>
                 <div class="f-col">
                   <label class="f-label" for="sslCountry">Country code (2 letters)</label>
-                  <input id="sslCountry" placeholder="DE" value="DE" maxlength="2" style="text-transform:uppercase;" />
+                  <input id="sslCountry" placeholder="DE" value="DE" maxlength="2" class="input-upper" />
                 </div>
                 <div class="f-col">
                   <label class="f-label" for="sslDays">Valid for (days)</label>
@@ -532,7 +532,7 @@
                 </button>
               </div>
               <p id="sslUploadResult" class="feedback"></p>
-              <p class="muted" style="font-size:.78rem;margin-top:.75rem;">
+              <p class="muted font-xs mt-md">
                 After installing a certificate, restart the server with
                 <code>--ssl-certfile /data/ssl/cert.pem --ssl-keyfile /data/ssl/key.pem</code>
                 or update your reverse proxy configuration.
@@ -611,13 +611,13 @@
               <div id="modelLibraryWrap" class="u-table-wrap"></div>
 
               <hr class="sep" />
-              <p class="f-label" style="margin-bottom:.5rem;">Pull a new model from Ollama registry</p>
-              <div class="f-grid" style="grid-template-columns:1fr auto;">
+              <p class="f-label mb-xs">Pull a new model from Ollama registry</p>
+              <div class="f-grid f-grid-1a">
                 <div class="f-col">
                   <input id="pullModelNameInput" placeholder="llama3.2, qwen2.5:3b, mistral, tinyllama…" />
                   <span class="f-hint">Any model name from hub.ollama.ai — pull may take several minutes</span>
                 </div>
-                <div class="f-col" style="justify-content:flex-end;">
+                <div class="f-col col-end">
                   <button class="btn btn-p" id="pullModelBtnAi" onclick="pullModelFromAiTab()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                     Pull
@@ -649,7 +649,7 @@
               </div>
             </div>
             <div class="card-body">
-              <div class="f-grid" style="grid-template-columns:1fr;">
+              <div class="f-grid f-grid-1">
                 <div class="f-col">
                   <label class="f-label" for="haTestKey">API key to test</label>
                   <input id="haTestKey" placeholder="Paste full key here…" />
@@ -719,14 +719,14 @@
               <p id="haCreateResult" class="feedback"></p>
               <!-- New key display (shown once) -->
               <div id="haNewKeyCard" class="hidden gap-top">
-                <div class="card" style="border:1px solid var(--green);background:color-mix(in srgb,var(--green) 6%,transparent);">
+                <div class="card card-success">
                   <div class="card-body">
-                    <p class="f-label" style="color:var(--green);margin-bottom:.5rem;">New key generated — copy it now, it won't be shown again in full</p>
-                    <div style="display:flex;gap:.5rem;align-items:center;">
-                      <code id="haNewKeyValue" style="flex:1;word-break:break-all;font-size:.8rem;background:var(--overlay);padding:.4rem .6rem;border-radius:4px;"></code>
+                    <p class="f-label text-success mb-xs">New key generated — copy it now, it won't be shown again in full</p>
+                    <div class="row gap-5">
+                      <code id="haNewKeyValue" class="code-chip"></code>
                       <button class="btn btn-g btn-sm" onclick="copyHaKey()">Copy</button>
                     </div>
-                    <p style="font-size:.78rem;color:var(--txt-3);margin-top:.5rem;">Paste this into your HA configuration. The table below shows a truncated preview.</p>
+                    <p class="font-xs text-muted-3 mt-xs">Paste this into your HA configuration. The table below shows a truncated preview.</p>
                   </div>
                 </div>
               </div>
@@ -759,7 +759,7 @@
                 <button class="btn btn-g" onclick="renderHaYaml()">Generate YAML</button>
                 <button class="btn btn-g" onclick="copyHaYaml()">Copy YAML</button>
               </div>
-              <pre id="haYamlOut" class="out" style="margin-top:.75rem;font-size:.75rem;white-space:pre;overflow-x:auto;"></pre>
+              <pre id="haYamlOut" class="out out-pre"></pre>
             </div>
           </div>
 
@@ -774,7 +774,7 @@
               <div class="card-titles"><h2>Audit Log</h2><p>Security-relevant actions, most recent first</p></div>
             </div>
             <div class="card-body">
-              <div class="f-grid" style="grid-template-columns:1fr 1fr 1fr;">
+              <div class="f-grid f-grid-111">
                 <div class="f-col">
                   <label class="f-label" for="auditActionFilter">Action</label>
                   <select id="auditActionFilter" onchange="auditFirstPage()">
@@ -804,7 +804,7 @@
                 </div>
               </div>
               <div id="auditTable" class="u-table-wrap gap-top"></div>
-              <div class="btn-row" style="align-items:center;">
+              <div class="btn-row">
                 <button class="btn btn-g btn-sm" id="auditPrev" onclick="auditPage(-1)">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
                   Prev
@@ -813,7 +813,7 @@
                   Next
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
                 </button>
-                <span id="auditSummary" class="muted" style="font-size:.8rem;"></span>
+                <span id="auditSummary" class="muted font-sm"></span>
               </div>
               <p id="auditResult" class="feedback"></p>
             </div>
@@ -853,8 +853,8 @@
             <div class="card-body">
               <div id="aiStatusGrid" class="path-test-grid"></div>
               <div id="aiModelList" class="gap-top hidden">
-                <p class="f-label" style="margin-bottom:.4rem;">Available models</p>
-                <div id="aiModelTags" style="display:flex;flex-wrap:wrap;gap:.35rem;"></div>
+                <p class="f-label mb-4px">Available models</p>
+                <div id="aiModelTags" class="row-wrap"></div>
               </div>
               <div class="btn-row">
                 <button class="btn btn-g" onclick="loadAiStatus()">

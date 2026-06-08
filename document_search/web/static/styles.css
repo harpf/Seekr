@@ -807,3 +807,72 @@ a:focus-visible, button:focus-visible, .btn:focus-visible,
     scroll-behavior: auto !important;
   }
 }
+
+/* ── Inline-style replacements: form-grid column presets & misc ── */
+/* Common .f-grid column templates that were inline */
+.f-grid-1a    { grid-template-columns: 1fr auto; }
+.f-grid-a1    { grid-template-columns: auto 1fr; }
+.f-grid-11a   { grid-template-columns: 1fr 1fr auto; }
+.f-grid-111   { grid-template-columns: 1fr 1fr 1fr; }
+
+/* Spacing tweaks */
+.mt-12        { margin-top: 12px; }
+.mt-2px       { margin-top: .2rem; }
+.mb-2px       { margin-bottom: .2rem; }
+.mb-xs        { margin-bottom: .5rem; }
+.mb-4px       { margin-bottom: .4rem; }
+.mt-xs        { margin-top: .5rem; }
+
+/* Small / extra-small text */
+.font-xs      { font-size: .78rem; }
+.font-2xs     { font-size: .75rem; }
+.font-85      { font-size: .85rem; }
+.font-875     { font-size: .875rem; }
+.text-muted-3 { color: var(--txt-3); }
+
+/* Row variants */
+.row-wide     { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.row-tight    { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; }
+
+/* Flex-col alignment helpers */
+.col-end      { justify-content: flex-end; }
+.self-end     { align-self: flex-end; }
+
+/* Tight card body (was padding:.75rem 1rem) */
+.card-body-tight { padding: .75rem 1rem; }
+
+/* Fixed-width number inputs */
+.w-80         { width: 80px; }
+.w-120        { width: 120px; }
+.w-full       { width: 100%; }
+.w-auto       { width: auto; }
+.w-1          { flex: 1; }
+.input-upper  { text-transform: uppercase; }
+
+/* Misc one-offs lifted from page templates */
+.mb-lg        { margin-bottom: 1.5rem; }
+.mt-md        { margin-top: .75rem; }
+.shrink-0     { flex-shrink: 0; }
+.p-0          { padding: 0; }
+.text-success { color: var(--green); }
+.break-all    { word-break: break-all; }
+.gap-6        { gap: .6rem; }
+.gap-5        { gap: .5rem; }
+.gap-4        { gap: .4rem; }
+.gap-3        { gap: .3rem; }
+
+/* HA new-key highlight card (shown once after key generation) */
+.card-success {
+  border: 1px solid var(--green);
+  background: color-mix(in srgb, var(--green) 6%, transparent);
+}
+/* Inline secret/code chip */
+.code-chip {
+  flex: 1; word-break: break-all; font-size: .8rem;
+  background: var(--overlay); padding: .4rem .6rem; border-radius: 4px;
+}
+/* Pre-formatted YAML/JSON output block */
+.out-pre {
+  margin-top: .75rem; font-size: .75rem;
+  white-space: pre; overflow-x: auto;
+}

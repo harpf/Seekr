@@ -94,7 +94,7 @@
               <div id="dropFileName" class="drop-file-name"></div>
             </div>
 
-            <div class="f-grid" style="margin-top:.875rem;">
+            <div class="f-grid mt-sm">
               <div class="f-col">
                 <label class="f-label" for="uploadPath">Target subpath</label>
                 <input id="uploadPath" placeholder="incoming/2026" list="uploadFolderList" autocomplete="off" />
@@ -131,7 +131,7 @@
             </div>
             <div class="card-titles">
               <h2>AI Filing Suggestion</h2>
-              <p id="aiSuggestionModel" class="muted" style="font-size:.78rem;"></p>
+              <p id="aiSuggestionModel" class="muted font-xs"></p>
             </div>
           </div>
           <div class="card-body">
@@ -159,10 +159,10 @@
             </div>
           </div>
           <div class="card-body">
-            <div class="f-grid" style="grid-template-columns:1fr;">
+            <div class="f-grid f-grid-1">
               <div class="f-col">
                 <label class="f-label">Paths to index</label>
-                <select id="pathsSelect" multiple size="6" style="width:100%;font-size:.875rem;">
+                <select id="pathsSelect" multiple size="6" class="w-full font-875">
                   <option disabled value="">Loading source folders…</option>
                 </select>
               </div>
@@ -192,12 +192,12 @@
             </div>
           </div>
           <div class="card-body">
-            <div class="f-grid" style="grid-template-columns: auto 1fr;">
+            <div class="f-grid f-grid-a1">
               <div class="f-col">
                 <label class="f-label" for="reorganizeLimit">Documents to analyse</label>
-                <input id="reorganizeLimit" type="number" min="1" max="50" value="10" style="width:80px;" />
+                <input id="reorganizeLimit" type="number" min="1" max="50" value="10" class="w-80" />
               </div>
-              <div class="f-col" style="justify-content:flex-end;align-self:flex-end;">
+              <div class="f-col col-end self-end">
                 <button class="btn btn-p" id="reorganizeStartBtn" onclick="startAiReorganize()">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                   Analyse with AI
@@ -252,29 +252,29 @@
             <div class="f-grid">
               <div class="f-col">
                 <label class="f-label" for="reindexDocId">Reindex document by ID</label>
-                <div style="display:flex;gap:.5rem;align-items:center;">
-                  <input id="reindexDocId" type="number" min="1" placeholder="e.g. 42" style="width:120px;" />
+                <div class="row gap-5">
+                  <input id="reindexDocId" type="number" min="1" placeholder="e.g. 42" class="w-120" />
                   <button id="reindexBtn" class="btn btn-p" onclick="reindexDocument()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
                     Reindex
                   </button>
                 </div>
-                <p id="reindexResult" class="feedback" style="margin-top:.5rem;"></p>
+                <p id="reindexResult" class="feedback mt-xs"></p>
               </div>
-              <div class="f-col" style="align-self:flex-end;">
+              <div class="f-col self-end">
                 <label class="f-label">Remove missing files</label>
-                <p class="muted" style="font-size:.82rem;margin-bottom:.5rem;">Removes index entries whose files no longer exist on disk.</p>
+                <p class="muted font-sm mb-xs">Removes index entries whose files no longer exist on disk.</p>
                 <button id="cleanupBtn" class="btn btn-g" onclick="runIndexCleanup()">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
                   Clean up index
                 </button>
-                <p id="cleanupResult" class="feedback" style="margin-top:.5rem;"></p>
+                <p id="cleanupResult" class="feedback mt-xs"></p>
               </div>
             </div>
-            <div class="f-col f-full" style="margin-top:.75rem;">
+            <div class="f-col f-full mt-md">
               <label class="f-label">System Update</label>
-              <p class="muted" style="font-size:.82rem;margin-bottom:.5rem;">Check GitHub for a newer version, then pull the latest code and rebuild all containers with <code>--no-cache</code>. The app will briefly go offline during the rebuild.</p>
-              <div class="btn-row" style="margin-bottom:.5rem;">
+              <p class="muted font-sm mb-xs">Check GitHub for a newer version, then pull the latest code and rebuild all containers with <code>--no-cache</code>. The app will briefly go offline during the rebuild.</p>
+              <div class="btn-row mb-xs">
                 <button id="checkUpdateBtn" class="btn btn-g" onclick="checkForUpdates()">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                   Check for updates
@@ -307,7 +307,7 @@
                 Scan for duplicates
               </button>
             </div>
-            <p id="duplicatesSummary" class="feedback" style="margin-top:.5rem;"></p>
+            <p id="duplicatesSummary" class="feedback mt-xs"></p>
             <div id="duplicatesList" class="gap-top"></div>
           </div>
         </div>
@@ -324,12 +324,12 @@
             </div>
           </div>
           <div class="card-body">
-            <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
-              <div class="f-col" style="flex-shrink:0;">
+            <div class="row-wide">
+              <div class="f-col shrink-0">
                 <label class="f-label" for="structureSampleSize">Documents to analyse</label>
-                <input id="structureSampleSize" type="number" min="10" max="100" value="50" style="width:80px;" />
+                <input id="structureSampleSize" type="number" min="10" max="100" value="50" class="w-80" />
               </div>
-              <div class="f-col" style="align-self:flex-end;">
+              <div class="f-col self-end">
                 <button id="structureStartBtn" class="btn btn-p" onclick="startStructureSuggestion()">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                   Analyse with AI
@@ -337,13 +337,13 @@
               </div>
             </div>
 
-            <div id="structureProgress" class="progress-wrap hidden" style="margin-top:.875rem;">
+            <div id="structureProgress" class="progress-wrap hidden mt-sm">
               <div class="progress-bar"><div id="structureProgressFill" class="progress-fill"></div></div>
               <div id="structureProgressStatus" class="progress-status"></div>
             </div>
 
             <div id="structureResult" class="hidden gap-top">
-              <p id="structureRationale" class="muted" style="font-size:.85rem;margin-bottom:.75rem;"></p>
+              <p id="structureRationale" class="muted font-85 mb-sm"></p>
               <div id="structureFolderList"></div>
             </div>
           </div>

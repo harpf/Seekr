@@ -94,3 +94,11 @@ def test_loading_and_error_helpers_present():
     assert "skeletonResults" in js, "skeletonResults() helper missing"
     assert "error-state" in js, "error-state markup missing"
     assert 'role="alert"' in js, "errorState not announced (role=alert)"
+
+
+def test_inline_style_budget():
+    total = 0
+    for name in ALL_PAGES:
+        html = (TEMPLATES / name).read_text(encoding="utf-8")
+        total += html.count("style=")
+    assert total <= 8, f"too many inline styles remain in templates: {total}"
