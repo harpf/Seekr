@@ -735,9 +735,19 @@ function renderResults(docs, append = false) {
     head.className = 'rc-head';
     const nameLink = document.createElement('a');
     nameLink.className = 'rc-name';
-    nameLink.href = doc.open_url;
-    nameLink.target = '_blank';
+    nameLink.href = doc.open_url;          // keep a real href for middle-click/copy
     nameLink.textContent = doc.filename;
+    nameLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      openPreview({
+        documentId: doc.document_id,
+        filename: doc.filename,
+        kind: doc.preview_kind,
+        previewUrl: doc.preview_url,
+        previewTextUrl: doc.preview_text_url,
+        openUrl: doc.open_url,
+      });
+    });
     const starBtn = document.createElement('button');
     starBtn.className = 'star-btn' + (doc.is_marked ? ' marked' : '');
     starBtn.title = doc.is_marked ? 'Unmark' : 'Mark';
@@ -822,6 +832,18 @@ function renderResults(docs, append = false) {
     reindexBtn.textContent = 'Reindex';
     reindexBtn.addEventListener('click', () => reindexDocumentFromSearch(doc.document_id));
 
+    const previewBtn = document.createElement('button');
+    previewBtn.className = 'btn btn-p btn-sm';
+    previewBtn.textContent = 'Preview';
+    previewBtn.addEventListener('click', () => openPreview({
+      documentId: doc.document_id,
+      filename: doc.filename,
+      kind: doc.preview_kind,
+      previewUrl: doc.preview_url,
+      previewTextUrl: doc.preview_text_url,
+      openUrl: doc.open_url,
+    }));
+
     const openLink = document.createElement('a');
     openLink.className = 'btn btn-g btn-sm';
     openLink.href = doc.open_url;
@@ -832,6 +854,7 @@ function renderResults(docs, append = false) {
     foot.appendChild(saveBtn);
     foot.appendChild(markBtn);
     foot.appendChild(reindexBtn);
+    foot.appendChild(previewBtn);
     foot.appendChild(openLink);
     card.appendChild(foot);
 
@@ -2894,4 +2917,199 @@ async function reEnqueueJob(jobId) {
   } catch (e) {
     showToast(e.message, 'err');
   }
+}
+
+// ── Document preview modal ─────────────────────────────────────────
+const _pv = {
+  el: null, body: null, title: null, download: null, closeBtn: null,
+  pager: null, prevBtn: null, nextBtn: null, pageInfo: null,
+  lastFocused: null, pdf: null, pageNum: 1, pageCount: 1, rendering: false,
+};
+
+function _pvInit() {
+  if (_pv.el) return;
+  _pv.el = document.getElementById('previewModal');
+  if (!_pv.el) return;
+  _pv.body = document.getElementById('pvBody');
+  _pv.title = document.getElementById('pvTitle');
+  _pv.download = document.getElementById('pvDownload');
+  _pv.closeBtn = document.getElementById('pvClose');
+  _pv.pager = document.getElementById('pvPager');
+  _pv.prevBtn = document.getElementById('pvPrev');
+  _pv.nextBtn = document.getElementById('pvNext');
+  _pv.pageInfo = document.getElementById('pvPageInfo');
+
+  _pv.closeBtn.addEventListener('click', closePreview);
+  _pv.el.addEventListener('click', (e) => { if (e.target === _pv.el) closePreview(); });
+  _pv.prevBtn.addEventListener('click', () => _pvGoto(_pv.pageNum - 1));
+  _pv.nextBtn.addEventListener('click', () => _pvGoto(_pv.pageNum + 1));
+  document.addEventListener('keydown', (e) => {
+    if (_pv.el.classList.contains('hidden')) return;
+    if (e.key === 'Escape') { e.preventDefault(); closePreview(); }
+    else if (e.key === 'ArrowLeft' && !_pv.pager.classList.contains('hidden')) _pvGoto(_pv.pageNum - 1);
+    else if (e.key === 'ArrowRight' && !_pv.pager.classList.contains('hidden')) _pvGoto(_pv.pageNum + 1);
+  });
+}
+
+function _pvAuthHeaders() {
+  // Match the rest of app.js: session token in X-Auth-Token.
+  return token ? { 'X-Auth-Token': token } : {};
+}
+
+async function openPreview(info) {
+  _pvInit();
+  if (!_pv.el) return;
+  _pv.lastFocused = document.activeElement;
+  _pv.title.textContent = info.filename || 'Preview';
+  _pv.download.href = info.openUrl || '#';
+  _pv.download.setAttribute('download', info.filename || '');
+  _pv.body.replaceChildren();
+  _pv.pager.classList.add('hidden');
+  _pv.pdf = null; _pv.pageNum = 1; _pv.pageCount = 1;
+
+  _pv.el.classList.remove('hidden');
+  _pv.el.setAttribute('aria-hidden', 'false');
+  _pv.closeBtn.focus();
+
+  const kind = info.kind || 'unsupported';
+  try {
+    if (kind === 'pdf')        await _pvRenderPdf(info);
+    else if (kind === 'image') _pvRenderImage(info);
+    else if (kind === 'text')  await _pvRenderText(info);
+    else                       await _pvRenderUnsupported(info);
+  } catch (err) {
+    console.error('preview failed', err);
+    _pvShowMessage('Could not render a preview. Use Download to open the file.');
+  }
+}
+
+function closePreview() {
+  if (!_pv.el) return;
+  _pv.el.classList.add('hidden');
+  _pv.el.setAttribute('aria-hidden', 'true');
+  _pv.body.replaceChildren();
+  _pv.pdf = null;
+  if (_pv.lastFocused && typeof _pv.lastFocused.focus === 'function') _pv.lastFocused.focus();
+}
+
+function _pvShowMessage(msg) {
+  const d = document.createElement('div');
+  d.className = 'pv-empty';
+  d.textContent = msg;
+  _pv.body.replaceChildren(d);
+}
+
+// Authenticated fetch of a binary URL → object URL (so the <img>/PDF carry the token).
+async function _pvFetchBlobUrl(url) {
+  const r = await fetch(url, { headers: _pvAuthHeaders() });
+  if (!r.ok) throw new Error('fetch failed: ' + r.status);
+  const blob = await r.blob();
+  return URL.createObjectURL(blob);
+}
+
+function _pvRenderImage(info) {
+  // Images need the auth header; fetch as blob then show.
+  _pvShowMessage('Loading image…');
+  _pvFetchBlobUrl(info.previewUrl).then((objUrl) => {
+    const img = document.createElement('img');
+    img.alt = info.filename || 'image preview';
+    img.src = objUrl;
+    img.addEventListener('load', () => URL.revokeObjectURL(objUrl), { once: true });
+    _pv.body.replaceChildren(img);
+  }).catch(() => _pvShowMessage('Could not load image. Use Download.'));
+}
+
+async function _pvRenderText(info) {
+  _pvShowMessage('Loading…');
+  const r = await fetch(info.previewTextUrl, { headers: _pvAuthHeaders() });
+  if (!r.ok) { _pvShowMessage('Could not load text.'); return; }
+  const data = await r.json();
+  const text = (data.blocks || []).map(b => b.text).join('\n\n');
+  const ext = (data.extension || '').toLowerCase();
+  const container = document.createElement('div');
+  if (ext === '.md' || ext === '.markdown') {
+    container.className = 'pv-md';
+    container.innerHTML = _pvRenderMarkdown(text);
+  } else {
+    container.className = 'pv-text';
+    container.textContent = text || '(no extractable text)';
+  }
+  const kids = [container];
+  if (data.truncated) {
+    const note = document.createElement('div');
+    note.className = 'pv-empty';
+    note.textContent = `Showing first ${data.blocks.length} blocks (truncated).`;
+    kids.push(note);
+  }
+  _pv.body.replaceChildren(...kids);
+}
+
+async function _pvRenderUnsupported(info) {
+  // Try the text pane first (docx/pptx have extracted blocks); else offer download.
+  try {
+    const r = await fetch(info.previewTextUrl, { headers: _pvAuthHeaders() });
+    if (r.ok) {
+      const data = await r.json();
+      if ((data.blocks || []).length) { await _pvRenderText(info); return; }
+    }
+  } catch (_e) { /* fall through */ }
+  _pvShowMessage('No in-browser preview for this file type. Use Download to open it.');
+}
+
+async function _pvRenderPdf(info) {
+  const pdfjs = window.pdfjsLib;
+  if (!pdfjs) { await _pvRenderUnsupported(info); return; }
+  _pvShowMessage('Loading PDF…');
+  const r = await fetch(info.previewUrl, { headers: _pvAuthHeaders() });
+  if (!r.ok) { _pvShowMessage('Could not load PDF.'); return; }
+  const buf = await r.arrayBuffer();
+  const doc = await pdfjs.getDocument({ data: buf }).promise;
+  _pv.pdf = doc;
+  _pv.pageCount = doc.numPages;
+  _pv.pageNum = 1;
+  _pv.pager.classList.toggle('hidden', doc.numPages <= 1);
+  await _pvRenderPdfPage(1);
+}
+
+async function _pvRenderPdfPage(n) {
+  if (!_pv.pdf || _pv.rendering) return;
+  _pv.rendering = true;
+  try {
+    const page = await _pv.pdf.getPage(n);
+    const scale = Math.min(2, (_pv.body.clientWidth - 32) / page.getViewport({ scale: 1 }).width);
+    const viewport = page.getViewport({ scale: Math.max(0.5, scale) });
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d');
+    _pv.body.replaceChildren(canvas);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    _pv.pageNum = n;
+    _pv.pageInfo.textContent = `Page ${n} / ${_pv.pageCount}`;
+    _pv.prevBtn.disabled = (n <= 1);
+    _pv.nextBtn.disabled = (n >= _pv.pageCount);
+  } finally {
+    _pv.rendering = false;
+  }
+}
+
+function _pvGoto(n) {
+  if (!_pv.pdf) return;
+  if (n < 1 || n > _pv.pageCount) return;
+  _pvRenderPdfPage(n);
+}
+
+// Minimal, XSS-safe markdown: escape first, then apply a few inline/block rules.
+function _pvRenderMarkdown(src) {
+  const esc = escHtml(src);
+  return esc
+    .replace(/^### (.*)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.*)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.*)$/gm, '<h1>$1</h1>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')
+    .replace(/\n{2,}/g, '<br><br>')
+    .replace(/\n/g, '<br>');
 }

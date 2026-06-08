@@ -191,7 +191,36 @@
     </div>
   </main>
 
+  <!-- ── Preview modal ── -->
+  <div id="previewModal" class="pv-backdrop hidden" role="dialog" aria-modal="true"
+       aria-labelledby="pvTitle" aria-hidden="true">
+    <div class="pv-panel" role="document">
+      <div class="pv-head">
+        <h2 id="pvTitle" class="pv-title">Preview</h2>
+        <div class="pv-head-actions">
+          <a id="pvDownload" class="btn btn-g btn-sm" href="#" download>Download</a>
+          <button id="pvClose" class="btn btn-g btn-sm" aria-label="Close preview" title="Close (Esc)">✕</button>
+        </div>
+      </div>
+      <div id="pvBody" class="pv-body" tabindex="-1">
+        <!-- Render target; filled by openPreview() -->
+      </div>
+      <div id="pvPager" class="pv-pager hidden">
+        <button id="pvPrev" class="btn btn-g btn-sm" aria-label="Previous page">‹ Prev</button>
+        <span id="pvPageInfo" class="pv-page-info" aria-live="polite">Page 1 / 1</span>
+        <button id="pvNext" class="btn btn-g btn-sm" aria-label="Next page">Next ›</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast-wrap" id="toastWrap" aria-live="polite" aria-atomic="false"></div>
+  <script type="module">
+    // Vendored PDF.js (Apache-2.0). Served locally — no CDN at runtime.
+    import * as pdfjsLib from '/static/vendor/pdfjs/pdf.min.mjs';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '/static/vendor/pdfjs/pdf.worker.min.mjs';
+    window.pdfjsLib = pdfjsLib;
+    window.dispatchEvent(new Event('pdfjs-ready'));
+  </script>
   <script src="/static/app.js"></script>
 </body>
 </html>
