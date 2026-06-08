@@ -79,3 +79,37 @@ def test_backup_captures_data_written_through_wal(svc, store):
         assert row is not None
     finally:
         conn.close()
+
+def test_list_backups_returns_newest_first(svc):
+    a = svc.create_backup()
+    b = svc.create_backup()
+    rows = svc.list_backups()
+    names = [r["filename"] for r in rows]
+    assert a["filename"] in names and b["filename"] in names
+    # Sorted by filename descending == newest timestamp first.
+    assert names == sorted(names, reverse=True)
+    for r in rows:
+        assert "filename" in r and "size_bytes" in r and "created_at" in r
+
+
+def test_list_backups_ignores_non_backup_files(svc):
+    svc.backup_dir.mkdir(parents=True, exist_ok=True)
+    (svc.backup_dir / "notes.txt").write_text("hi", encoding="utf-8")
+    (svc.backup_dir / "random.db").write_text("x", encoding="utf-8")
+    svc.create_backup()
+    names = [r["filename"] for r in svc.list_backups()]
+    assert "notes.txt" not in names
+    assert "random.db" not in names  # wrong prefix
+
+
+def test_prune_keeps_only_newest_n(tmp_path, store):
+    svc = BackupService(store, backup_dir=tmp_path / "backups", keep=2)
+    import time
+    created = []
+    for _ in range(4):
+        created.append(svc.create_backup()["filename"])
+        time.sleep(1.05)  # ensure distinct second-resolution timestamps
+    remaining = {r["filename"] for r in svc.list_backups()}
+    assert len(remaining) == 2
+    # The two newest survive.
+    assert set(sorted(created)[-2:]) == remaining

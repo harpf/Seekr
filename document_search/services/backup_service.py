@@ -77,9 +77,47 @@ class BackupService:
             dest_conn.close()
 
         size = dest.stat().st_size
+        self.prune()
         return {
             "path": str(dest),
             "filename": dest.name,
             "size_bytes": size,
             "created_at": datetime.now(tz=UTC).isoformat(),
         }
+
+    # ── list / prune ───────────────────────────────────────────────────
+    def list_backups(self) -> list[dict[str, Any]]:
+        if not self.backup_dir.exists():
+            return []
+        out: list[dict[str, Any]] = []
+        for p in self.backup_dir.iterdir():
+            if not p.is_file():
+                continue
+            if not (p.name.startswith(_BACKUP_PREFIX) and p.name.endswith(_BACKUP_SUFFIX)):
+                continue
+            st = p.stat()
+            out.append(
+                {
+                    "filename": p.name,
+                    "path": str(p),
+                    "size_bytes": st.st_size,
+                    "created_at": datetime.fromtimestamp(st.st_mtime, tz=UTC).isoformat(),
+                }
+            )
+        # Filename embeds the timestamp, so a reverse string sort is newest-first.
+        out.sort(key=lambda r: r["filename"], reverse=True)
+        return out
+
+    def prune(self) -> list[str]:
+        """Delete all but the newest `self.keep` backups. Returns deleted names."""
+        if self.keep <= 0:
+            return []
+        backups = self.list_backups()
+        deleted: list[str] = []
+        for r in backups[self.keep :]:
+            try:
+                Path(r["path"]).unlink()
+                deleted.append(r["filename"])
+            except OSError:
+                pass
+        return deleted
