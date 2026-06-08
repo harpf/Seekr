@@ -16,3 +16,8 @@ starlette==0.50.0
 cryptography>=42.0.0,<46.0
 psutil>=5.9.0
 prometheus-client>=0.20.0
+
+# Optional: enable the Redis backend for sessions + rate limiting in
+# multi-replica deployments. Activate with DOCUMENT_SEARCH_STATE_BACKEND=redis.
+# Not required for the default SQLite backend (used in CI).
+# redis>=5.0.0
