@@ -265,6 +265,12 @@ class SavedSearchRequest(BaseModel):
     filters: dict = Field(default_factory=dict)
 
 
+class PreferencesRequest(BaseModel):
+    theme: str | None = None
+    results_per_page: int | None = None
+    default_filters: dict | None = None
+
+
 class GroupCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     display_name: str | None = None
@@ -980,7 +986,12 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         user = db.get_user_by_id(user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        return {"id": user_id, "username": user["username"], "role": role}
+        return {
+            "id": user_id,
+            "username": user["username"],
+            "role": role,
+            "preferences": db.get_preferences(user_id),
+        }
 
     @app.post("/api/documents/mark")
     def api_mark(req: MarkRequest, x_auth_token: str | None = Header(default=None)):
@@ -1009,6 +1020,21 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         user_id = require_user(x_auth_token)
         db = store()
         return db.get_user_tags(user_id)
+
+    @app.get("/api/preferences")
+    def api_get_preferences(x_auth_token: str | None = Header(default=None)):
+        user_id = require_user(x_auth_token)
+        db = store()
+        return db.get_preferences(user_id)
+
+    @app.put("/api/preferences")
+    def api_set_preferences(
+        req: PreferencesRequest, x_auth_token: str | None = Header(default=None)
+    ):
+        user_id = require_user(x_auth_token)
+        db = store()
+        update = req.model_dump(exclude_none=True)
+        return db.set_preferences(user_id, update)
 
     @app.post("/api/documents/{document_id}/reindex")
     def api_reindex_document(document_id: int, request: Request, x_auth_token: str | None = Header(default=None)):

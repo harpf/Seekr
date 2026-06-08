@@ -67,3 +67,97 @@ def test_preferences_isolated_between_users(store):
     store.set_preferences(bob, {"theme": "light"})
     assert store.get_preferences(alice)["theme"] == "dark"
     assert store.get_preferences(bob)["theme"] == "light"
+
+
+# ---------------------------------------------------------------------------
+# API endpoints: GET/PUT /api/preferences and /api/me preferences field
+# ---------------------------------------------------------------------------
+
+fastapi = pytest.importorskip("fastapi", reason="fastapi not installed")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from document_search.app import create_app  # noqa: E402
+
+
+def _client(tmp_path):
+    return TestClient(create_app(str(tmp_path / "t.db")))
+
+
+def _login(client, username="admin", password="admin"):
+    r = client.post("/api/login", json={"username": username, "password": password})
+    assert r.status_code == 200, r.text
+    return {"X-Auth-Token": r.json()["token"]}
+
+
+def _create_user(client, admin_headers, username="bob", password="bobpassword1"):
+    r = client.post(
+        "/api/users",
+        headers=admin_headers,
+        json={"username": username, "password": password, "role": "user"},
+    )
+    assert r.status_code == 200, r.text
+    return _login(client, username, password)
+
+
+def test_get_preferences_returns_defaults(tmp_path):
+    with _client(tmp_path) as client:
+        headers = _login(client)
+        r = client.get("/api/preferences", headers=headers)
+        assert r.status_code == 200, r.text
+        assert r.json() == DEFAULT_PREFERENCES
+
+
+def test_get_preferences_requires_auth(tmp_path):
+    with _client(tmp_path) as client:
+        assert client.get("/api/preferences").status_code == 401
+
+
+def test_put_preferences_persists_and_returns_merged(tmp_path):
+    with _client(tmp_path) as client:
+        headers = _login(client)
+        r = client.put(
+            "/api/preferences",
+            headers=headers,
+            json={"theme": "dark", "results_per_page": 50},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["theme"] == "dark"
+        assert body["results_per_page"] == 50
+        # Unspecified keys keep defaults
+        assert body["default_filters"] == DEFAULT_PREFERENCES["default_filters"]
+        # Persisted across a fresh GET
+        again = client.get("/api/preferences", headers=headers).json()
+        assert again["theme"] == "dark"
+        assert again["results_per_page"] == 50
+
+
+def test_put_preferences_requires_auth(tmp_path):
+    with _client(tmp_path) as client:
+        assert client.put("/api/preferences", json={"theme": "dark"}).status_code == 401
+
+
+def test_me_includes_preferences(tmp_path):
+    with _client(tmp_path) as client:
+        headers = _login(client)
+        r = client.get("/api/me", headers=headers)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["preferences"] == DEFAULT_PREFERENCES
+        # Existing keys still present
+        assert "id" in body
+        assert "username" in body
+        assert "role" in body
+
+
+def test_preferences_isolated_between_users_over_api(tmp_path):
+    with _client(tmp_path) as client:
+        admin_headers = _login(client)
+        bob_headers = _create_user(client, admin_headers)
+
+        client.put("/api/preferences", headers=admin_headers, json={"theme": "dark"})
+        client.put("/api/preferences", headers=bob_headers, json={"theme": "light"})
+
+        assert client.get("/api/preferences", headers=admin_headers).json()["theme"] == "dark"
+        assert client.get("/api/preferences", headers=bob_headers).json()["theme"] == "light"
