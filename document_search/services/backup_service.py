@@ -197,3 +197,209 @@ class BackupService:
             "restored_from": source.name,
             "safety_backup": safety["filename"] if safety else None,
         }
+
+    # ── export / import ────────────────────────────────────────────────
+    _EXPORT_TABLES = (
+        "documents",
+        "content_blocks",
+        "user_tags",
+        "document_tags",
+        "principals",
+        "user_groups",
+        "document_acl",
+    )
+
+    def _dump_table(self, table: str) -> list[dict[str, Any]]:
+        rows = self.store.conn.execute(f"SELECT * FROM {table}").fetchall()
+        return [dict(r) for r in rows]
+
+    def export_archive(self, out_path: Path | str) -> dict[str, Any]:
+        """Write a portable zip: manifest.json + tables/<name>.json.
+
+        Excludes `users` (password hashes) and `content_fts` (rebuilt on import).
+        """
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        counts: dict[str, int] = {}
+        with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as z:
+            for table in self._EXPORT_TABLES:
+                data = self._dump_table(table)
+                counts[table] = len(data)
+                z.writestr(f"tables/{table}.json", json.dumps(data, default=str))
+            manifest = {
+                "format": "seekr-export",
+                "version": 1,
+                "created_at": datetime.now(tz=UTC).isoformat(),
+                "counts": counts,
+            }
+            z.writestr("manifest.json", json.dumps(manifest, indent=2))
+        return {"path": str(out_path), "counts": counts}
+
+    def import_archive(self, archive_path: Path | str) -> dict[str, Any]:
+        """Import documents + tags + ACLs from a seekr-export zip.
+
+        Strategy (additive, idempotent):
+          * principals matched by (type, external_id); inserted if absent.
+          * documents matched by `path` (UNIQUE); inserted if absent.
+          * Foreign keys are remapped from source IDs to target IDs via lookup
+            on the natural keys above, so IDs need not align across databases.
+          * content_blocks, user_tags, document_tags, document_acl are linked
+            through the remapped document/principal IDs.
+        """
+        archive_path = Path(archive_path)
+        with zipfile.ZipFile(archive_path) as z:
+            manifest = json.loads(z.read("manifest.json"))
+            if manifest.get("format") != "seekr-export":
+                raise ValueError("Not a seekr-export archive")
+            tables = {
+                t: json.loads(z.read(f"tables/{t}.json"))
+                for t in self._EXPORT_TABLES
+            }
+
+        conn = self.store.conn
+        now = datetime.now(tz=UTC).isoformat()
+        imported = {t: 0 for t in self._EXPORT_TABLES}
+
+        # 1. principals: (type, external_id) -> target principal id
+        principal_map: dict[int, int] = {}
+        for p in tables["principals"]:
+            existing = conn.execute(
+                "SELECT id FROM principals WHERE type=? AND external_id=?",
+                (p["type"], p["external_id"]),
+            ).fetchone()
+            if existing:
+                principal_map[p["id"]] = existing["id"]
+            else:
+                cur = conn.execute(
+                    "INSERT INTO principals(type, external_id, display_name, created_at) "
+                    "VALUES(?,?,?,?)",
+                    (p["type"], p["external_id"], p.get("display_name"),
+                     p.get("created_at") or now),
+                )
+                principal_map[p["id"]] = cur.lastrowid
+                imported["principals"] += 1
+
+        # 2. documents: path -> target document id
+        doc_map: dict[int, int] = {}
+        doc_cols = (
+            "path", "filename", "extension", "mime_type", "file_size",
+            "modified_at", "created_at", "sha256", "indexed_at", "status",
+            "error_message", "page_count", "slide_count", "word_count",
+            "metadata_json", "owner_principal_id",
+        )
+        for d in tables["documents"]:
+            existing = conn.execute(
+                "SELECT id FROM documents WHERE path=?", (d["path"],)
+            ).fetchone()
+            if existing:
+                doc_map[d["id"]] = existing["id"]
+                continue
+            owner = d.get("owner_principal_id")
+            mapped_owner = principal_map.get(owner) if owner is not None else None
+            placeholders = ",".join("?" * len(doc_cols))
+            values = [d.get(c) for c in doc_cols]
+            values[doc_cols.index("owner_principal_id")] = mapped_owner
+            cur = conn.execute(
+                f"INSERT INTO documents({','.join(doc_cols)}) VALUES({placeholders})",
+                values,
+            )
+            doc_map[d["id"]] = cur.lastrowid
+            imported["documents"] += 1
+
+        # 3. content_blocks (+ FTS) for newly-imported docs only
+        for b in tables["content_blocks"]:
+            tgt_doc = doc_map.get(b["document_id"])
+            if tgt_doc is None:
+                continue
+            already = conn.execute(
+                "SELECT 1 FROM content_blocks WHERE document_id=? AND block_number=? "
+                "AND block_type=?",
+                (tgt_doc, b["block_number"], b["block_type"]),
+            ).fetchone()
+            if already:
+                continue
+            bcur = conn.execute(
+                "INSERT INTO content_blocks(document_id, block_type, block_number, "
+                "text, extractor, text_length, metadata_json) VALUES(?,?,?,?,?,?,?)",
+                (tgt_doc, b["block_type"], b["block_number"], b["text"],
+                 b["extractor"], b["text_length"], b.get("metadata_json")),
+            )
+            drow = conn.execute(
+                "SELECT path, filename, extension FROM documents WHERE id=?",
+                (tgt_doc,),
+            ).fetchone()
+            conn.execute(
+                "INSERT INTO content_fts(document_id, block_id, path, filename, "
+                "extension, block_type, block_number, text) VALUES(?,?,?,?,?,?,?,?)",
+                (tgt_doc, bcur.lastrowid, drow["path"], drow["filename"],
+                 drow["extension"], b["block_type"], str(b["block_number"]), b["text"]),
+            )
+            imported["content_blocks"] += 1
+
+        # 4. user_tags: (user_id, name) — user_id is NOT remapped (users excluded).
+        #    We match the importing DB's existing users by id where present.
+        tag_map: dict[int, int] = {}
+        for t in tables["user_tags"]:
+            existing = conn.execute(
+                "SELECT id FROM user_tags WHERE user_id=? AND name=?",
+                (t["user_id"], t["name"]),
+            ).fetchone()
+            if existing:
+                tag_map[t["id"]] = existing["id"]
+                continue
+            user_exists = conn.execute(
+                "SELECT 1 FROM users WHERE id=?", (t["user_id"],)
+            ).fetchone()
+            if not user_exists:
+                continue  # skip tags whose owning user wasn't imported
+            cur = conn.execute(
+                "INSERT INTO user_tags(user_id, name) VALUES(?,?)",
+                (t["user_id"], t["name"]),
+            )
+            tag_map[t["id"]] = cur.lastrowid
+            imported["user_tags"] += 1
+
+        # 5. document_tags
+        for dt in tables["document_tags"]:
+            tgt_doc = doc_map.get(dt["document_id"])
+            tgt_tag = tag_map.get(dt["tag_id"])
+            if tgt_doc is None or tgt_tag is None:
+                continue
+            conn.execute(
+                "INSERT OR IGNORE INTO document_tags(user_id, document_id, tag_id, "
+                "created_at) VALUES(?,?,?,?)",
+                (dt["user_id"], tgt_doc, tgt_tag, dt.get("created_at") or now),
+            )
+            imported["document_tags"] += 1
+
+        # 6. user_groups (membership) — remap principal, keep user_id if present
+        for ug in tables["user_groups"]:
+            tgt_principal = principal_map.get(ug["principal_id"])
+            if tgt_principal is None:
+                continue
+            user_exists = conn.execute(
+                "SELECT 1 FROM users WHERE id=?", (ug["user_id"],)
+            ).fetchone()
+            if not user_exists:
+                continue
+            conn.execute(
+                "INSERT OR IGNORE INTO user_groups(user_id, principal_id) VALUES(?,?)",
+                (ug["user_id"], tgt_principal),
+            )
+            imported["user_groups"] += 1
+
+        # 7. document_acl — remap both document and principal
+        for a in tables["document_acl"]:
+            tgt_doc = doc_map.get(a["document_id"])
+            tgt_principal = principal_map.get(a["principal_id"])
+            if tgt_doc is None or tgt_principal is None:
+                continue
+            conn.execute(
+                "INSERT OR IGNORE INTO document_acl(document_id, principal_id, "
+                "permission, granted_at) VALUES(?,?,?,?)",
+                (tgt_doc, tgt_principal, a["permission"], a.get("granted_at") or now),
+            )
+            imported["document_acl"] += 1
+
+        conn.commit()
+        return {"imported": imported}

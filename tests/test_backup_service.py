@@ -162,3 +162,115 @@ def test_restore_unknown_backup_raises(svc):
 def test_restore_rejects_path_traversal(svc):
     with pytest.raises(ValueError):
         svc.restore_backup("../../etc/passwd")
+
+def _seed_doc_with_tag_and_acl(store):
+    """Create one user (alice), one doc, a tag, and a non-public ACL grant."""
+    from datetime import UTC, datetime
+    now = datetime.now(tz=UTC).isoformat()
+    alice_id = store.create_user("alice", "pw-alice")
+    cur = store.conn.execute(
+        "INSERT INTO documents(path, filename, extension, file_size, modified_at, "
+        "sha256, indexed_at, status) VALUES(?,?,?,?,?,?,?,?)",
+        ("/d/report.pdf", "report.pdf", ".pdf", 20, now, "h-report", now, "ok"),
+    )
+    doc_id = cur.lastrowid
+    store.conn.execute(
+        "INSERT INTO content_blocks(document_id, block_type, block_number, text, "
+        "extractor, text_length) VALUES(?,?,?,?,?,?)",
+        (doc_id, "paragraph", 1, "quarterly numbers", "txt", 17),
+    )
+    tcur = store.conn.execute(
+        "INSERT INTO user_tags(user_id, name) VALUES(?, 'finance')", (alice_id,)
+    )
+    store.conn.execute(
+        "INSERT INTO document_tags(user_id, document_id, tag_id, created_at) "
+        "VALUES(?,?,?,?)",
+        (alice_id, doc_id, tcur.lastrowid, now),
+    )
+    alice_p = store.conn.execute(
+        "SELECT principal_id FROM users WHERE id=?", (alice_id,)
+    ).fetchone()["principal_id"]
+    store.conn.execute(
+        "INSERT INTO document_acl(document_id, principal_id, permission, granted_at) "
+        "VALUES(?,?, 'read', ?)",
+        (doc_id, alice_p, now),
+    )
+    store.conn.commit()
+    return alice_id, doc_id
+
+
+def test_export_creates_zip_with_manifest_and_tables(svc, store, tmp_path):
+    _seed_doc_with_tag_and_acl(store)
+    out = tmp_path / "export.zip"
+    info = svc.export_archive(out)
+    assert Path(info["path"]).exists()
+    import json
+    import zipfile
+    with zipfile.ZipFile(out) as z:
+        names = set(z.namelist())
+        assert "manifest.json" in names
+        for table in ("documents", "content_blocks", "user_tags",
+                      "document_tags", "principals", "user_groups", "document_acl"):
+            assert f"tables/{table}.json" in names
+        manifest = json.loads(z.read("manifest.json"))
+        assert manifest["format"] == "seekr-export"
+        assert manifest["counts"]["documents"] == 1
+        docs = json.loads(z.read("tables/documents.json"))
+        assert docs[0]["path"] == "/d/report.pdf"
+
+
+def test_import_round_trips_documents_tags_and_acls(tmp_path, store):
+    src_alice, src_doc = _seed_doc_with_tag_and_acl(store)
+    svc = BackupService(store, backup_dir=tmp_path / "b", keep=14)
+    archive = tmp_path / "export.zip"
+    svc.export_archive(archive)
+
+    # Fresh, empty target DB.
+    target = SqliteStore(tmp_path / "target.db")
+    target.create_user("alice", "pw-alice")  # same principal external_id
+    target_svc = BackupService(target, backup_dir=tmp_path / "tb", keep=14)
+    result = target_svc.import_archive(archive)
+
+    # Document came across.
+    doc = target.conn.execute(
+        "SELECT id FROM documents WHERE path='/d/report.pdf'"
+    ).fetchone()
+    assert doc is not None
+    # Tag + tag link came across.
+    tag = target.conn.execute(
+        "SELECT id FROM user_tags WHERE name='finance'"
+    ).fetchone()
+    assert tag is not None
+    link = target.conn.execute(
+        "SELECT 1 FROM document_tags WHERE document_id=? AND tag_id=?",
+        (doc["id"], tag["id"]),
+    ).fetchone()
+    assert link is not None
+    # ACL grant came across, mapped to alice's principal in the TARGET db.
+    alice_p = target.conn.execute(
+        "SELECT principal_id FROM users WHERE username='alice'"
+    ).fetchone()["principal_id"]
+    acl = target.conn.execute(
+        "SELECT permission FROM document_acl WHERE document_id=? AND principal_id=?",
+        (doc["id"], alice_p),
+    ).fetchone()
+    assert acl is not None and acl["permission"] == "read"
+    assert result["imported"]["documents"] == 1
+
+
+def test_import_is_idempotent_on_path(tmp_path, store):
+    _seed_doc_with_tag_and_acl(store)
+    svc = BackupService(store, backup_dir=tmp_path / "b", keep=14)
+    archive = tmp_path / "export.zip"
+    svc.export_archive(archive)
+
+    target = SqliteStore(tmp_path / "target.db")
+    target.create_user("alice", "pw-alice")
+    tsvc = BackupService(target, backup_dir=tmp_path / "tb", keep=14)
+    tsvc.import_archive(archive)
+    tsvc.import_archive(archive)  # second import must not duplicate
+
+    count = target.conn.execute(
+        "SELECT COUNT(*) FROM documents WHERE path='/d/report.pdf'"
+    ).fetchone()[0]
+    assert count == 1
