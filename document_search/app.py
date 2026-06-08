@@ -383,6 +383,22 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     worker.handler = _counting_handler  # type: ignore[method-assign]
 
+    from document_search.services.backup_service import BackupService
+    # Pass backup_dir explicitly (built with os.path string ops, not Path.parent)
+    # so create_app stays robust if os.name is monkeypatched elsewhere: pathlib's
+    # Path.parent selects the path flavor from os.name and would otherwise raise
+    # NotImplementedError when computing the default backup directory.
+    _backup_dir = os.getenv(
+        "DOCUMENT_SEARCH_BACKUP_DIR",
+        os.path.join(os.path.dirname(os.path.abspath(db_path)) or ".", "backups"),
+    )
+    backup_service = BackupService(
+        _startup_db,
+        backup_dir=_backup_dir,
+        keep=int(os.getenv("DOCUMENT_SEARCH_BACKUP_KEEP", "14")),
+    )
+    app.state.backup_service = backup_service
+
     def _scheduled_paths() -> list[str]:
         try:
             raw = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
@@ -2738,6 +2754,20 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             log.exception("failed to refresh queue-depth gauges for /metrics")
         body, content_type = _obs.render_metrics()
         return Response(content=body, media_type=content_type)
+
+    @app.post("/api/backup/run")
+    def api_backup_run(x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        try:
+            return backup_service.create_backup()
+        except Exception as exc:
+            log.exception("Backup creation failed")
+            raise HTTPException(status_code=500, detail="Backup failed") from exc
+
+    @app.get("/api/backups")
+    def api_backup_list(x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        return {"backups": backup_service.list_backups()}
 
     @app.get("/api/status")
     def api_status(x_auth_token: str | None = Header(default=None)):
