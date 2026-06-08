@@ -74,63 +74,69 @@ def test_nvidia_smi_absence_logs_warning(tmp_path, monkeypatch, caplog):
     ), f"expected a GPU warning, got: {[rec.message for rec in caplog.records]}"
 
 
-def test_expired_sessions_are_evicted_on_login(tmp_path, monkeypatch):
-    """Logging in prunes other expired tokens from the in-memory sessions dict."""
+def test_expired_session_is_rejected_after_backdating_row(tmp_path):
+    """An expired session row is purged on read and rejected with 401.
+
+    Session state now lives in the shared `sessions` table (externalised store),
+    so eviction is lazy-on-read rather than an in-memory sweep on login.
+    """
     import time as _time
 
     from fastapi.testclient import TestClient
 
     from document_search.app import create_app
+    from document_search.index.sqlite_store import SqliteStore
 
-    app = create_app(str(tmp_path / "t.db"))
+    db = tmp_path / "t.db"
+    app = create_app(str(db))
     with TestClient(app) as client:
-        # First login -> token A
-        a = client.post("/api/login", json={"username": "admin", "password": "admin"}).json()["token"]
-        sessions = app.state.sessions  # exposed for testability (added in Step 3)
-        assert a in sessions
-        # Backdate token A's issued-at to 9 hours ago (TTL is 8h) -> expired
-        user_id, _issued, role = sessions[a]
-        sessions[a] = (user_id, _time.time() - 9 * 3600, role)
-        # Second login -> token B; eviction during login must drop the stale A
-        b = client.post("/api/login", json={"username": "admin", "password": "admin"}).json()["token"]
-        assert b in sessions
-        assert a not in sessions, "expired session A should have been evicted"
+        token = client.post(
+            "/api/login", json={"username": "admin", "password": "admin"}
+        ).json()["token"]
+        # Backdate the session's expiry past now -> expired in the shared table.
+        s = SqliteStore(db)
+        s.conn.execute(
+            "UPDATE sessions SET expires_at=? WHERE token=?",
+            (_time.time() - 1, token),
+        )
+        s.conn.commit()
+        r = client.get("/api/me", headers={"X-Auth-Token": token})
+        assert r.status_code == 401
+        # Lazy delete on read: the dead row should be gone.
+        row = s.conn.execute(
+            "SELECT 1 FROM sessions WHERE token=?", (token,)
+        ).fetchone()
+        assert row is None
 
 
-def test_sessions_hard_cap_evicts_oldest(tmp_path):
+def test_rate_limit_prunes_aged_out_attempts(tmp_path):
+    """login_attempts rows older than the window are pruned on the next check.
+
+    The rate-limiter store opportunistically deletes rows beyond the window so
+    the table stays small without a separate sweeper.
+    """
     import time as _time
 
     from fastapi.testclient import TestClient
 
-    from document_search.app import _SESSION_MAX, create_app
+    from document_search.app import _RATE_LIMIT_WINDOW, create_app
+    from document_search.index.sqlite_store import SqliteStore
 
-    app = create_app(str(tmp_path / "t.db"))
+    db = tmp_path / "t.db"
+    app = create_app(str(db))
     with TestClient(app) as client:
-        sessions = app.state.sessions
-        # Fill past the cap with synthetic, non-expired entries
-        now = _time.time()
-        for i in range(_SESSION_MAX + 5):
-            sessions[f"tok{i}"] = (1, now + i, "user")  # ascending issued-at
-        # A real login triggers the cap check
-        client.post("/api/login", json={"username": "admin", "password": "admin"})
-        assert len(sessions) <= _SESSION_MAX + 1  # +1 for the just-issued real token
-
-
-def test_rate_limit_dict_drops_empty_ip_keys(tmp_path, monkeypatch):
-    """An IP whose failures have all aged out must be removed from the tracker."""
-    import time as _time
-
-    from fastapi.testclient import TestClient
-
-    from document_search.app import _RATE_LIMIT_WINDOW, _login_failures, create_app
-
-    _login_failures.clear()
-    app = create_app(str(tmp_path / "t.db"))
-    with TestClient(app) as client:
-        # Seed an aged-out failure for a fake IP
+        # Seed an aged-out failure for a fake IP directly in the shared table.
+        s = SqliteStore(db)
         old = _time.time() - (_RATE_LIMIT_WINDOW + 10)
-        _login_failures["10.0.0.99"] = [old]
-        # Any login attempt runs _check_rate_limit for the *real* client IP, but
-        # the eviction sweep must also drop the aged-out fake IP.
+        s.conn.execute(
+            "INSERT INTO login_attempts(ip, attempted_at) VALUES(?, ?)",
+            ("10.0.0.99", old),
+        )
+        s.conn.commit()
+        # Any login attempt runs _check_rate_limit, whose is_blocked() globally
+        # prunes rows older than the window.
         client.post("/api/login", json={"username": "admin", "password": "wrong"})
-        assert "10.0.0.99" not in _login_failures, "aged-out IP should be evicted"
+        remaining = s.conn.execute(
+            "SELECT COUNT(*) FROM login_attempts WHERE ip=?", ("10.0.0.99",)
+        ).fetchone()[0]
+        assert remaining == 0, "aged-out attempt should have been pruned"

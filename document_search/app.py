@@ -80,13 +80,10 @@ def extractor_for(ext: str):
 # Avoids the cost of creating+migrating a new connection on every request.
 _thread_local = threading.local()
 
-# Login rate limiting — simple in-memory tracker (ip → list of failure timestamps).
-_login_failures: dict[str, list[float]] = {}
+# Login rate limiting — bounds enforced by the externalised RateLimiter store.
 _RATE_LIMIT_MAX = 10       # max failures
 _RATE_LIMIT_WINDOW = 300   # seconds (5 min)
-_SESSION_TTL_S = 60 * 60 * 8     # 8 hours — single source of truth for session lifetime
-_SESSION_MAX = 10_000            # hard cap on tracked sessions (DoS guard)
-_FAILURE_IP_MAX = 10_000         # hard cap on tracked rate-limit IPs (DoS guard)
+_SESSION_TTL_SECONDS = 60 * 60 * 8   # 8 hours, matches the legacy in-memory expiry
 
 # Username / password validation.
 _USERNAME_RE = re.compile(r'^[a-zA-Z0-9_\-.]{1,64}$')
@@ -370,8 +367,25 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     )
     templates = Jinja2Templates(directory="document_search/web/templates")
     app.mount("/static", StaticFiles(directory="document_search/web/static"), name="static")
-    sessions: dict[str, tuple[int, float, str]] = {}
-    app.state.sessions = sessions
+    # Externalised auth state (sessions + login rate-limit).
+    from document_search.services.rate_limiter import build_rate_limiter
+    from document_search.services.session_store import build_session_store
+    _state_backend = os.getenv("DOCUMENT_SEARCH_STATE_BACKEND", "sqlite").strip().lower()
+    _redis_url = os.getenv("DOCUMENT_SEARCH_REDIS_URL", "redis://localhost:6379/0")
+    # A dedicated explicit SqliteStore shared by both SQLite-backed stores so
+    # sessions/attempts live on one observable connection (not the thread-local
+    # `store()`); WAL + busy_timeout=5000 serialise the small auth writes cleanly.
+    _auth_db = SqliteStore(Path(db_path))
+    session_store = build_session_store(
+        sqlite_store=_auth_db, backend=_state_backend, redis_url=_redis_url,
+    )
+    rate_limiter = build_rate_limiter(
+        sqlite_store=_auth_db, backend=_state_backend,
+        max_failures=_RATE_LIMIT_MAX, window_seconds=_RATE_LIMIT_WINDOW,
+        redis_url=_redis_url,
+    )
+    app.state.session_store = session_store
+    app.state.rate_limiter = rate_limiter
     jobs: dict[str, JobState] = {}
     upload_root = Path(os.getenv("DOCUMENT_SEARCH_UPLOAD_ROOT", "/documents/uploads"))
     organizer = AiOrganizer()
@@ -452,6 +466,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     @app.on_event("startup")
     def _start_worker() -> None:
         job_store.mark_interrupted_running_jobs()
+        session_store.purge_expired()
         worker.start()
         if scheduler is not None:
             scheduler.start()
@@ -948,58 +963,18 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     app.add_middleware(_VersionRewrite)
 
     # ── Auth helpers ───────────────────────────────────────────────────
-    def _evict_stale_failures(now: float) -> None:
-        """Drop IP keys whose failures have all aged out, and enforce a cap."""
-        stale = [
-            ip for ip, ts in _login_failures.items()
-            if not any(now - t < _RATE_LIMIT_WINDOW for t in ts)
-        ]
-        for ip in stale:
-            _login_failures.pop(ip, None)
-        if len(_login_failures) > _FAILURE_IP_MAX:
-            overflow = len(_login_failures) - _FAILURE_IP_MAX
-            # Evict the IPs with the oldest most-recent failure first.
-            oldest = sorted(_login_failures.items(), key=lambda kv: max(kv[1]))[:overflow]
-            for ip, _ in oldest:
-                _login_failures.pop(ip, None)
-            log.warning("Rate-limit IP cap %d exceeded; evicted %d oldest IP(s)", _FAILURE_IP_MAX, overflow)
-
     def _check_rate_limit(ip: str) -> None:
-        now = time.time()
-        _evict_stale_failures(now)
-        recent = [t for t in _login_failures.get(ip, []) if now - t < _RATE_LIMIT_WINDOW]
-        if recent:
-            _login_failures[ip] = recent
-        else:
-            _login_failures.pop(ip, None)
-        if len(recent) >= _RATE_LIMIT_MAX:
-            raise HTTPException(status_code=429, detail="Too many failed login attempts. Try again in 5 minutes.")
+        if rate_limiter.is_blocked(ip):
+            raise HTTPException(
+                status_code=429,
+                detail="Too many failed login attempts. Try again in 5 minutes.",
+            )
 
     def _record_failure(ip: str) -> None:
-        _login_failures.setdefault(ip, []).append(time.time())
+        rate_limiter.record_failure(ip)
 
     def _clear_failures(ip: str) -> None:
-        _login_failures.pop(ip, None)
-
-    def _evict_expired_sessions() -> None:
-        """Prune expired sessions and enforce the hard cap.
-
-        Called opportunistically on each login and auth check. O(n) over the
-        sessions dict, but n is bounded by `_SESSION_MAX`.
-        """
-        now = time.time()
-        expired = [t for t, (_uid, issued, _role) in sessions.items() if now - issued > _SESSION_TTL_S]
-        for t in expired:
-            sessions.pop(t, None)
-        if expired:
-            log.info("Evicted %d expired session(s)", len(expired))
-        if len(sessions) > _SESSION_MAX:
-            # Drop the oldest sessions (smallest issued-at) down to the cap.
-            overflow = len(sessions) - _SESSION_MAX
-            oldest = sorted(sessions.items(), key=lambda kv: kv[1][1])[:overflow]
-            for t, _ in oldest:
-                sessions.pop(t, None)
-            log.warning("Session cap %d exceeded; evicted %d oldest session(s)", _SESSION_MAX, overflow)
+        rate_limiter.clear(ip)
 
     def _validate_username(username: str) -> None:
         if not _USERNAME_RE.match(username):
@@ -1014,26 +989,23 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             raise HTTPException(status_code=400, detail="ollama_url must start with http:// or https://")
 
     def require_user(token: str | None) -> int:
-        _evict_expired_sessions()
-        if not token or token not in sessions:
+        if not token:
             raise HTTPException(status_code=401, detail="Unauthorized")
-        user_id, issued, _role = sessions[token]
-        if time.time() - issued > _SESSION_TTL_S:
-            sessions.pop(token, None)
-            raise HTTPException(status_code=401, detail="Session expired")
-        return user_id
+        sess = session_store.get(token)
+        if sess is None:
+            # Could be unknown OR expired-and-purged — both are Unauthorized.
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        return sess["user_id"]
 
     def require_admin(token: str | None) -> int:
-        _evict_expired_sessions()
-        if not token or token not in sessions:
+        if not token:
             raise HTTPException(status_code=401, detail="Unauthorized")
-        user_id, issued, role = sessions[token]
-        if time.time() - issued > _SESSION_TTL_S:
-            sessions.pop(token, None)
-            raise HTTPException(status_code=401, detail="Session expired")
-        if role != "admin":
+        sess = session_store.get(token)
+        if sess is None:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        if sess["role"] != "admin":
             raise HTTPException(status_code=403, detail="Admin role required")
-        return user_id
+        return sess["user_id"]
 
     @app.get("/", response_class=HTMLResponse)
     def index_page(request: Request):
@@ -1105,7 +1077,6 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     def api_login(req: LoginRequest, request: Request):
         ip = request.client.host if request.client else "unknown"
         _check_rate_limit(ip)
-        _evict_expired_sessions()
         db = store()
         user = db.get_user(req.username)
         if not user or not verify_password(req.password, user["salt"], user["password_hash"]):
@@ -1114,17 +1085,17 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         _clear_failures(ip)
         token = uuid.uuid4().hex
         role = user["role"] if "role" in user.keys() else "user"
-        sessions[token] = (user["id"], time.time(), role)
+        session_store.create(token, user["id"], role, _SESSION_TTL_SECONDS)
         return {"token": token, "username": user["username"], "role": role}
 
     @app.get("/api/me", tags=["auth"])
     def api_me(x_auth_token: str | None = Header(default=None)):
-        if not x_auth_token or x_auth_token not in sessions:
+        if not x_auth_token:
             raise HTTPException(status_code=401, detail="Unauthorized")
-        user_id, issued, role = sessions[x_auth_token]
-        if time.time() - issued > _SESSION_TTL_S:
-            sessions.pop(x_auth_token, None)
-            raise HTTPException(status_code=401, detail="Session expired")
+        sess = session_store.get(x_auth_token)
+        if sess is None:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        user_id = sess["user_id"]
         db = store()
         user = db.get_user_by_id(user_id)
         if not user:
@@ -1132,7 +1103,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         return {
             "id": user_id,
             "username": user["username"],
-            "role": role,
+            "role": sess["role"],
             "preferences": db.get_preferences(user_id),
         }
 
