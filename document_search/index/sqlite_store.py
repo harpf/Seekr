@@ -260,8 +260,7 @@ class SqliteStore:
               success INTEGER NOT NULL DEFAULT 0,
               error_message TEXT,
               attempted_at TEXT NOT NULL,
-              FOREIGN KEY (webhook_id) REFERENCES webhooks(id) ON DELETE CASCADE,
-              FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL
+              FOREIGN KEY (webhook_id) REFERENCES webhooks(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_wh_deliveries_hook ON webhook_deliveries(webhook_id);
             """
