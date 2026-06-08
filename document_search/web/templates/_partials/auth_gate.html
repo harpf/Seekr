@@ -1,0 +1,43 @@
+{# Shared sign-in gate. Hidden via JS once authenticated.
+   Variables (all optional, with sensible defaults):
+     gate_title    – the <h1> shown above the card
+     gate_subtitle – the muted line under the <h1>
+     gate_note     – the small text under "Sign in" in the card head #}
+<section id="authGate" class="auth-wrap" aria-labelledby="authGateHeading">
+  <div class="pg-head">
+    <h1 id="authGateHeading">{{ gate_title | default("Welcome to Seekr") }}</h1>
+    <p>{{ gate_subtitle | default("Sign in to access your document index.") }}</p>
+  </div>
+  <div class="card">
+    <div class="card-head">
+      <div class="card-ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </div>
+      <div class="card-titles">
+        <h2>Sign in</h2>
+        <p>{{ gate_note | default("Authentication required") }}</p>
+      </div>
+    </div>
+    <div class="card-body">
+      <form class="login-form" onsubmit="event.preventDefault(); login();">
+        <div class="f-grid" style="grid-template-columns:1fr;">
+          <div class="f-col">
+            <label class="f-label" for="username">Username</label>
+            <input id="username" name="username" placeholder="admin" value="admin" autocomplete="username" />
+          </div>
+          <div class="f-col">
+            <label class="f-label" for="password">Password</label>
+            <input id="password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" />
+          </div>
+        </div>
+        <div class="btn-row">
+          <button type="submit" class="btn btn-p">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+            Sign in
+          </button>
+        </div>
+        <p id="loginResult" class="feedback" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+  </div>
+</section>
