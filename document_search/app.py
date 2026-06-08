@@ -345,6 +345,7 @@ _OPENAPI_TAGS = [
     {"name": "ha",     "description": "Home Assistant integration — authenticate with `X-Api-Key` header"},
     {"name": "ai",     "description": "Ollama AI operations"},
     {"name": "users",  "description": "User management (admin only)"},
+    {"name": "webhooks", "description": "Outbound webhook subscriptions (admin)."},
     {"name": "config", "description": "Application configuration"},
     {"name": "system", "description": "System diagnostics and maintenance"},
     {"name": "update", "description": "Application update via git + Docker"},
@@ -2092,6 +2093,41 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             request=request,
         )
         return {"status": "password changed"}
+
+    # ── Webhooks (admin) ───────────────────────────────────────────────
+
+    @app.get("/api/webhooks", tags=["webhooks"])
+    def api_list_webhooks(x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        return webhook_service.list_webhooks()
+
+    @app.post("/api/webhooks", tags=["webhooks"])
+    def api_create_webhook(req: WebhookCreateRequest, x_auth_token: str | None = Header(default=None)):
+        admin_id = require_admin(x_auth_token)
+        from document_search.services.webhook_service import WebhookUrlError
+        try:
+            return webhook_service.create(
+                url=req.url,
+                event_type=req.event_type,
+                secret=req.secret,
+                created_by=admin_id,
+            )
+        except WebhookUrlError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+    @app.delete("/api/webhooks/{webhook_id}", tags=["webhooks"])
+    def api_delete_webhook(webhook_id: int, x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        if not webhook_service.delete(webhook_id):
+            raise HTTPException(status_code=404, detail="Webhook not found")
+        return {"status": "deleted"}
+
+    @app.get("/api/webhooks/{webhook_id}/deliveries", tags=["webhooks"])
+    def api_list_webhook_deliveries(webhook_id: int, x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        return webhook_service.list_deliveries(webhook_id)
 
     # ── Groups (admin) ─────────────────────────────────────────────────
 
