@@ -17,6 +17,7 @@ import tempfile
 import threading
 import time
 import uuid
+import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -291,6 +292,10 @@ class RemoveDuplicatesRequest(BaseModel):
     remove_ids: list[int]
 
 
+class RestoreRequest(BaseModel):
+    filename: str
+
+
 @dataclass
 class JobState:
     status: str
@@ -434,6 +439,31 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         if scheduler is not None:
             scheduler.stop(timeout=5.0)
         worker.stop(timeout=5.0)
+
+    # Opt-in periodic backup scheduler. Disabled by default (interval 0); enable
+    # by setting DOCUMENT_SEARCH_BACKUP_INTERVAL_HOURS to a positive value. It
+    # simply enqueues a "backup" job each interval; the worker does the work.
+    _backup_interval_h = float(os.getenv("DOCUMENT_SEARCH_BACKUP_INTERVAL_HOURS", "0"))
+    _backup_scheduler_stop = threading.Event()
+
+    def _backup_scheduler() -> None:
+        interval_s = _backup_interval_h * 3600.0
+        while not _backup_scheduler_stop.wait(interval_s):
+            try:
+                job_store.enqueue("backup", {})
+            except Exception:
+                log.exception("Failed to enqueue scheduled backup job")
+
+    @app.on_event("startup")
+    def _start_backup_scheduler() -> None:
+        if _backup_interval_h > 0:
+            threading.Thread(
+                target=_backup_scheduler, name="backup-scheduler", daemon=True
+            ).start()
+
+    @app.on_event("shutdown")
+    def _stop_backup_scheduler() -> None:
+        _backup_scheduler_stop.set()
 
     @worker.handler("index_paths")
     def _handle_index_paths(payload: dict, progress_cb):
@@ -661,6 +691,10 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 embedded += 1
             progress_cb({"total": total, "embedded": embedded})
         return {"skipped": False, "embedded": embedded, "total": total}
+
+    @worker.handler("backup")
+    def _handle_backup(payload: dict, progress_cb):
+        return app.state.backup_service.create_backup()
 
     def store() -> SqliteStore:
         """Return a per-thread SqliteStore, creating it once on first use."""
@@ -2768,6 +2802,46 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     def api_backup_list(x_auth_token: str | None = Header(default=None)):
         require_admin(x_auth_token)
         return {"backups": backup_service.list_backups()}
+
+    @app.post("/api/backup/restore")
+    def api_backup_restore(req: RestoreRequest, x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        try:
+            return backup_service.restore_backup(req.filename)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/backup/export")
+    def api_backup_export(x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        out_path = Path(tempfile.gettempdir()) / f"seekr_export_{uuid.uuid4().hex}.zip"
+        backup_service.export_archive(out_path)
+        return FileResponse(
+            out_path,
+            media_type="application/zip",
+            filename="seekr_export.zip",
+        )
+
+    @app.post("/api/backup/import")
+    async def api_backup_import(
+        file: UploadFile = File(...),
+        x_auth_token: str | None = Header(default=None),
+    ):
+        require_admin(x_auth_token)
+        tmp_path = Path(tempfile.gettempdir()) / f"seekr_import_{uuid.uuid4().hex}.zip"
+        try:
+            data = await file.read()
+            tmp_path.write_bytes(data)
+            return backup_service.import_archive(tmp_path)
+        except (ValueError, KeyError, zipfile.BadZipFile) as exc:
+            raise HTTPException(status_code=400, detail="Invalid import archive") from exc
+        finally:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
 
     @app.get("/api/status")
     def api_status(x_auth_token: str | None = Header(default=None)):
