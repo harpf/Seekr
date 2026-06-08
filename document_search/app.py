@@ -35,6 +35,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -887,6 +888,34 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             if stored and secrets.compare_digest(stored, key_value):
                 return k
         return None
+
+    # ── CORS ───────────────────────────────────────────────────────────
+    # Default closed: with no configured origins the SPA is served same-origin
+    # and no cross-origin requests are permitted. Configure explicitly via
+    # DOCUMENT_SEARCH_CORS_ORIGINS (comma-separated) or config.json
+    # "cors_allow_origins": [...].
+    def _resolve_cors_origins() -> list[str]:
+        env_val = os.getenv("DOCUMENT_SEARCH_CORS_ORIGINS", "").strip()
+        if env_val:
+            return [o.strip() for o in env_val.split(",") if o.strip()]
+        if config_path.exists():
+            try:
+                raw = json.loads(config_path.read_text(encoding="utf-8"))
+                origins = raw.get("cors_allow_origins")
+                if isinstance(origins, list):
+                    return [str(o).strip() for o in origins if str(o).strip()]
+            except Exception:
+                pass
+        return []
+
+    _cors_origins = _resolve_cors_origins()
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=bool(_cors_origins),
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # ── Security headers ───────────────────────────────────────────────
     class _SecurityHeaders(BaseHTTPMiddleware):
