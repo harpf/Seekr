@@ -2744,6 +2744,9 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 "is_marked": m["is_marked"],
                 "tags": m["tags"],
                 "open_url": f"/api/files/open?document_id={doc_id}",
+                "preview_url": f"/api/files/preview?document_id={doc_id}",
+                "preview_text_url": f"/api/files/preview-text?document_id={doc_id}",
+                "preview_kind": _preview_kind(doc.get("extension", "")),
                 "hit_count": len(doc["hits"]),
             })
 
@@ -2937,6 +2940,35 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             acl_params,
         ).fetchone()[0]
         return {"documents": docs, "content_blocks": blocks, "total_file_size_bytes": total_size, "db_path": db_path}
+
+    @app.get("/api/files/preview")
+    def api_files_preview(document_id: int, x_auth_token: str | None = Header(default=None)):
+        user_id = require_user(x_auth_token)
+        db = store()
+        doc = db.get_document_by_id(document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if not db.user_can_read_document(user_id, document_id):
+            # Do not leak existence: same 404 as a missing document.
+            raise HTTPException(status_code=404, detail="Document not found")
+        p = Path(doc["path"])
+        if not p.exists() or not p.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+        ext = doc["extension"] or p.suffix
+        kind = _preview_kind(ext)
+        media_type = _preview_mime(ext)
+        # Inline disposition so the browser renders rather than downloads.
+        # filename uses the stored name (ASCII-safe fallback for the header).
+        safe_name = doc["filename"].replace('"', "")
+        return FileResponse(
+            p,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'inline; filename="{safe_name}"',
+                "X-Preview-Kind": kind,
+                "Cache-Control": "private, max-age=60",
+            },
+        )
 
     @app.get("/api/files/preview-text")
     def api_files_preview_text(document_id: int, x_auth_token: str | None = Header(default=None)):

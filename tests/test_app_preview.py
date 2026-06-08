@@ -150,6 +150,11 @@ def test_preview_is_acl_gated_non_owner_404(tmp_path):
     # Create the default admin + a second, non-admin user, and a doc only admin sees.
     seed = SqliteStore(db)
     seed.ensure_default_admin()
+    # ensure_default_admin creates the admin with a NULL principal; _backfill_acl
+    # wires up its 'user' principal + 'public' group membership. Run it now so the
+    # admin principal id below is non-NULL (otherwise the owner/ACL grant is NULL
+    # and the doc stays effectively unowned -> re-publicized by later backfills).
+    seed._backfill_acl()
     seed.create_user("bob", "bobpw")
     now = datetime.now(tz=UTC).isoformat()
     secret = tmp_path / "secret.txt"
@@ -158,6 +163,7 @@ def test_preview_is_acl_gated_non_owner_404(tmp_path):
     admin_principal = seed.conn.execute(
         "SELECT principal_id FROM users WHERE username='admin'"
     ).fetchone()["principal_id"]
+    assert admin_principal is not None
     cur = seed.conn.execute(
         "INSERT INTO documents(path, filename, extension, file_size, modified_at, sha256, "
         "indexed_at, status, owner_principal_id) VALUES(?,?,?,?,?,?,?,?,?)",
@@ -173,7 +179,11 @@ def test_preview_is_acl_gated_non_owner_404(tmp_path):
         "VALUES(?,?,?,?,?,?,?,?)",
         (doc_id, bcur.lastrowid, str(secret), "secret.txt", ".txt", "paragraph", "1", "classified"),
     )
-    # Remove any auto-granted 'public' read so bob truly can't see it.
+    # Remove any auto-granted 'public' read AND leave an explicit admin-only read
+    # grant. The explicit ACL row is essential: SqliteStore._backfill_acl re-grants
+    # 'public' read to any doc that has *no* ACL rows on the next store construction
+    # (TestClient builds a fresh thread-local store per worker thread). Keeping an
+    # owner-principal ACL row keeps the doc private and stable.
     public_id = seed.conn.execute(
         "SELECT id FROM principals WHERE type='group' AND external_id='public'"
     ).fetchone()
@@ -182,6 +192,11 @@ def test_preview_is_acl_gated_non_owner_404(tmp_path):
             "DELETE FROM document_acl WHERE document_id=? AND principal_id=?",
             (doc_id, public_id["id"]),
         )
+    seed.conn.execute(
+        "INSERT OR IGNORE INTO document_acl(document_id, principal_id, permission, granted_at) "
+        "VALUES(?,?, 'read', ?)",
+        (doc_id, admin_principal, now),
+    )
     seed.conn.commit()
     seed.conn.close()
 
@@ -200,3 +215,23 @@ def test_preview_is_acl_gated_non_owner_404(tmp_path):
         r = client.get(f"/api/files/preview?document_id={doc_id}",
                        headers={"X-Auth-Token": admin})
         assert r.status_code == 200, r.text
+
+
+def test_search_results_include_preview_fields(tmp_path):
+    db = tmp_path / "t.db"
+    app = create_app(str(db))
+    f = tmp_path / "soup.txt"
+    f.write_text("secret recipe for soup", encoding="utf-8")
+    _seed_doc(db, f, "secret recipe for soup", ext=".txt")
+    with TestClient(app) as client:
+        token = _login(client)
+        r = client.post("/api/search", headers={"X-Auth-Token": token},
+                        json={"query": "soup"})
+        assert r.status_code == 200, r.text
+        results = r.json()  # /api/search returns the list of result dicts directly
+        assert results, "expected at least one hit"
+        doc = results[0]
+        assert "preview_url" in doc
+        assert "preview_text_url" in doc
+        assert doc["preview_kind"] == "text"
+        assert doc["preview_url"].endswith(f"document_id={doc['document_id']}")
