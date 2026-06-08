@@ -1,5 +1,5 @@
-from pathlib import Path
 import pytest
+
 from document_search.index.sqlite_store import SqliteStore
 
 
@@ -34,7 +34,6 @@ def test_login_attempts_table_columns(store):
     assert expected.issubset(cols), f"missing: {expected - cols}"
 
 
-import time
 from document_search.services.session_store import (
     SqliteSessionStore,
     build_session_store,
