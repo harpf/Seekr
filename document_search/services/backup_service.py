@@ -121,3 +121,79 @@ class BackupService:
             except OSError:
                 pass
         return deleted
+
+    # ── restore ────────────────────────────────────────────────────────
+    def _resolve_backup(self, filename: str) -> Path:
+        """Resolve a backup filename safely (no path traversal)."""
+        if "/" in filename or "\\" in filename or filename in ("", ".", ".."):
+            raise ValueError("Invalid backup filename")
+        if not (filename.startswith(_BACKUP_PREFIX) and filename.endswith(_BACKUP_SUFFIX)):
+            raise ValueError("Not a backup file")
+        candidate = (self.backup_dir / filename).resolve()
+        if candidate.parent != self.backup_dir.resolve():
+            raise ValueError("Backup escapes backup directory")
+        if not candidate.exists():
+            raise FileNotFoundError(f"Backup not found: {filename}")
+        return candidate
+
+    def restore_backup(self, filename: str) -> dict[str, Any]:
+        """Restore the chosen backup over the live DB file.
+
+        Safety contract:
+          1. Take a *pre-restore* safety backup of the CURRENT database first.
+          2. Validate the chosen backup opens cleanly (integrity_check).
+          3. Copy it over `db_path`, removing stale -wal/-shm sidecars.
+          4. Return {"restart_required": True}. The caller MUST restart the
+             process; we never hot-swap the file under an open connection.
+        """
+        source = self._resolve_backup(filename)
+
+        # 1. Safety backup of the current state (best-effort; uses the online API).
+        try:
+            safety = self.create_backup()
+        except Exception:
+            safety = None
+
+        # 2. Validate the chosen backup is a clean SQLite database.
+        check_conn = sqlite3.connect(source)
+        try:
+            ok = check_conn.execute("PRAGMA integrity_check").fetchone()[0]
+        finally:
+            check_conn.close()
+        if ok != "ok":
+            raise ValueError(f"Backup failed integrity_check: {ok}")
+
+        # 3. Swap the file. Remove WAL/SHM sidecars so the restored DB is used.
+        #    Overwrite in place (r+b) rather than reopening the destination with
+        #    a fresh handle: on Windows the live connection memory-maps the DB
+        #    file (PRAGMA mmap_size), so `shutil.copyfile`/`os.replace` fail with
+        #    a sharing/EINVAL error while that handle is open. Writing through the
+        #    existing inode works cross-platform; the stale live connection is
+        #    abandoned anyway (restart_required=True).
+        data = source.read_bytes()
+        if self.db_path.exists():
+            with open(self.db_path, "r+b") as fdst:
+                fdst.seek(0)
+                fdst.write(data)
+                fdst.truncate()
+        else:
+            shutil.copyfile(source, self.db_path)
+        for sidecar in (
+            self.db_path.with_name(self.db_path.name + "-wal"),
+            self.db_path.with_name(self.db_path.name + "-shm"),
+        ):
+            try:
+                sidecar.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                # On Windows the live connection may still hold the sidecar open
+                # (sharing violation). Harmless: the required restart abandons
+                # that connection and SQLite discards stale -wal/-shm on open.
+                pass
+
+        return {
+            "restart_required": True,
+            "restored_from": source.name,
+            "safety_backup": safety["filename"] if safety else None,
+        }

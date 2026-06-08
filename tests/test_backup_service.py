@@ -113,3 +113,52 @@ def test_prune_keeps_only_newest_n(tmp_path, store):
     assert len(remaining) == 2
     # The two newest survive.
     assert set(sorted(created)[-2:]) == remaining
+
+def test_restore_takes_pre_restore_safety_backup(svc, store):
+    _seed_one_document(store)
+    snapshot = svc.create_backup()  # backup containing 1 doc
+
+    # Mutate the live DB so we can prove restore reverts it.
+    store.conn.execute("DELETE FROM documents")
+    store.conn.commit()
+
+    before = {r["filename"] for r in svc.list_backups()}
+    result = svc.restore_backup(snapshot["filename"])
+    after = {r["filename"] for r in svc.list_backups()}
+
+    # A new "pre-restore" safety backup must have been created.
+    new_files = after - before
+    assert len(new_files) >= 1, "restore must take a pre-restore safety backup"
+    assert result["restart_required"] is True
+    assert result["restored_from"] == snapshot["filename"]
+
+
+def test_restore_swaps_db_file_contents(tmp_path):
+    # Use a fresh store we fully control so we can re-open after the swap.
+    db = tmp_path / "document_index.db"
+    s = SqliteStore(db)
+    _seed_one_document(s)
+    svc = BackupService(s, backup_dir=tmp_path / "backups", keep=14)
+    snap = svc.create_backup()
+
+    # Delete everything, then restore.
+    s.conn.execute("DELETE FROM documents")
+    s.conn.commit()
+    s.conn.close()  # simulate the restart: close the live connection first
+
+    svc.restore_backup(snap["filename"])
+
+    # Re-open: the restored file must contain the original row again.
+    s2 = SqliteStore(db)
+    count = s2.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+    assert count == 1
+
+
+def test_restore_unknown_backup_raises(svc):
+    with pytest.raises(FileNotFoundError):
+        svc.restore_backup("document_index_19990101_000000.db")
+
+
+def test_restore_rejects_path_traversal(svc):
+    with pytest.raises(ValueError):
+        svc.restore_backup("../../etc/passwd")
