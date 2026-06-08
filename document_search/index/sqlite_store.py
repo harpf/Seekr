@@ -11,6 +11,17 @@ from document_search.models import ExtractionResult, FileFingerprint
 
 HISTORY_CAP = 20
 
+DEFAULT_PREFERENCES = {
+    "theme": "system",
+    "results_per_page": 25,
+    "default_filters": {
+        "filetype": [],
+        "tags": [],
+        "path": "",
+        "block_type": "",
+    },
+}
+
 
 class SqliteStore:
     def __init__(self, db_path: Path):
@@ -223,6 +234,12 @@ class SqliteStore:
             CREATE INDEX IF NOT EXISTS idx_audit_action  ON audit_log(action);
             CREATE INDEX IF NOT EXISTS idx_audit_target  ON audit_log(target_type, target_id);
             CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
+            CREATE TABLE IF NOT EXISTS user_preferences (
+              user_id INTEGER PRIMARY KEY,
+              prefs_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
             """
         )
         # Migration: add role column for existing databases
@@ -1016,6 +1033,50 @@ class SqliteStore:
             (user_id,),
         ).fetchall()
         return [{"name": r["name"], "count": r["doc_count"]} for r in rows]
+
+    def get_preferences(self, user_id: int) -> dict:
+        """Return the user's UI preferences as a fresh mutable dict.
+
+        Starts from a deep copy of ``DEFAULT_PREFERENCES`` and layers any
+        stored values over it key-by-key, so callers always receive a complete
+        preferences object that is safe to mutate without affecting the
+        module-level defaults.
+        """
+        import copy
+
+        prefs = copy.deepcopy(DEFAULT_PREFERENCES)
+        row = self.conn.execute(
+            "SELECT prefs_json FROM user_preferences WHERE user_id=?", (user_id,)
+        ).fetchone()
+        if row is not None:
+            stored = json.loads(row["prefs_json"])
+            for key in DEFAULT_PREFERENCES:
+                if key in stored:
+                    prefs[key] = stored[key]
+        return prefs
+
+    def set_preferences(self, user_id: int, prefs: dict) -> dict:
+        """Merge known preference keys over the current values and persist.
+
+        Unknown keys are dropped. The single per-user row is upserted, so the
+        store never accumulates duplicate rows. Returns the merged preferences.
+        """
+        current = self.get_preferences(user_id)
+        for key in DEFAULT_PREFERENCES:
+            if key in prefs:
+                current[key] = prefs[key]
+        self.conn.execute(
+            """
+            INSERT INTO user_preferences(user_id, prefs_json, updated_at)
+            VALUES(?,?,?)
+            ON CONFLICT(user_id) DO UPDATE SET
+              prefs_json=excluded.prefs_json,
+              updated_at=excluded.updated_at
+            """,
+            (user_id, json.dumps(current, sort_keys=True), datetime.now(tz=UTC).isoformat()),
+        )
+        self.conn.commit()
+        return current
 
     def record_search_history(self, user_id: int, query: str, filters: dict) -> None:
         """Record a search in the user's rolling history.
