@@ -69,6 +69,125 @@ let token = localStorage.getItem('documentSearchToken');
 let chipFiletype, chipTagFilter, chipUploadTags;
 const _resultTagChips = {};
 
+// ── User preferences (server-backed, localStorage-cached) ──────────
+// Mirror of the server-side DEFAULT_PREFERENCES. `userPrefs` is seeded
+// from the offline cache merged over these defaults so theme/page-size
+// apply instantly before the network round-trip resolves.
+const DEFAULT_PREFS = {
+  theme: 'system',
+  results_per_page: 25,
+  default_filters: { filetype: [], tags: [], path: '', block_type: '' },
+};
+
+function _loadCachedPrefs() {
+  try {
+    const raw = localStorage.getItem('seekr_prefs');
+    if (!raw) return { ...DEFAULT_PREFS };
+    const cached = JSON.parse(raw) || {};
+    return {
+      ...DEFAULT_PREFS,
+      ...cached,
+      default_filters: { ...DEFAULT_PREFS.default_filters, ...(cached.default_filters || {}) },
+    };
+  } catch (_) {
+    return { ...DEFAULT_PREFS };
+  }
+}
+
+let userPrefs = _loadCachedPrefs();
+
+// Apply a theme to <html>. 'system' means "follow the OS" — we express
+// that by REMOVING the data-theme attribute (never data-theme="system").
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (theme === 'light' || theme === 'dark') {
+    root.setAttribute('data-theme', theme);
+  } else {
+    root.removeAttribute('data-theme');
+  }
+}
+
+// Merge `prefs` into userPrefs, persist to the offline cache, apply the
+// theme, and (if on the search page with chips constructed) pre-fill the
+// filter chips/inputs from default_filters. Idempotent — safe to call
+// repeatedly (e.g. once for theme, once after chips exist).
+function applyPreferences(prefs) {
+  if (!prefs) return;
+  userPrefs = {
+    ...DEFAULT_PREFS,
+    ...userPrefs,
+    ...prefs,
+    default_filters: {
+      ...DEFAULT_PREFS.default_filters,
+      ...(userPrefs.default_filters || {}),
+      ...(prefs.default_filters || {}),
+    },
+  };
+  try { localStorage.setItem('seekr_prefs', JSON.stringify(userPrefs)); } catch (_) {}
+
+  applyTheme(userPrefs.theme);
+
+  // Reflect results-per-page in the optional select, if present.
+  const rpp = document.getElementById('resultsPerPage');
+  if (rpp) rpp.value = String(userPrefs.results_per_page);
+
+  // Pre-fill search filters from defaults when the chips exist.
+  const df = userPrefs.default_filters || {};
+  if (chipFiletype && Array.isArray(df.filetype)) chipFiletype.setValues(df.filetype);
+  if (chipTagFilter && Array.isArray(df.tags)) chipTagFilter.setValues(df.tags);
+  const pathEl = document.getElementById('pathFilter');
+  if (pathEl && typeof df.path === 'string') pathEl.value = df.path;
+  const blockEl = document.getElementById('blockType');
+  if (blockEl && typeof df.block_type === 'string') blockEl.value = df.block_type;
+}
+
+// Apply the cached theme immediately, then refresh from the server.
+// Errors are swallowed so the offline cache keeps working.
+async function hydratePreferences() {
+  applyTheme(userPrefs.theme);
+  try {
+    const me = await api('/api/me');
+    if (me?.preferences) applyPreferences(me.preferences);
+  } catch (_) {}
+}
+
+// Optimistically apply a partial patch, then persist it. On failure the
+// optimistic value stays in the local cache (toast informs the user).
+async function savePreferences(patch) {
+  applyPreferences({ ...userPrefs, ...patch });
+  try {
+    const saved = await api('/api/preferences', 'PUT', patch);
+    if (saved) applyPreferences(saved);
+  } catch (_) {
+    showToast('Preference saved locally — could not reach server', 'info');
+  }
+}
+
+// Idempotently bind the optional theme toggle + results-per-page select.
+// Both are guarded so this is a harmless no-op when the controls are
+// absent (the theming UI / select may not have landed yet).
+function bindPreferenceControls() {
+  const themeBtn = document.getElementById('themeToggle');
+  if (themeBtn && !themeBtn.dataset.bound) {
+    themeBtn.dataset.bound = '1';
+    themeBtn.addEventListener('click', () => {
+      const order = ['system', 'light', 'dark'];
+      const next = order[(order.indexOf(userPrefs.theme) + 1) % order.length];
+      savePreferences({ theme: next });
+    });
+  }
+
+  const rpp = document.getElementById('resultsPerPage');
+  if (rpp && !rpp.dataset.bound) {
+    rpp.dataset.bound = '1';
+    rpp.value = String(userPrefs.results_per_page);
+    rpp.addEventListener('change', () => {
+      const n = Number(rpp.value) || DEFAULT_PREFS.results_per_page;
+      savePreferences({ results_per_page: n });
+    });
+  }
+}
+
 async function api(path, method = 'GET', body = null) {
   const headers = { 'X-Auth-Token': token ?? '' };
   if (body !== null) headers['Content-Type'] = 'application/json';
@@ -174,6 +293,7 @@ async function login() {
     setText('loginResult', '', '');
     showToast(`Signed in as ${data.username}`, 'ok');
     showAuthedPanels();
+    await hydratePreferences();
     if (data.role === 'admin') showAdminUI();
     await loadStatus();
     if (document.getElementById('configPanel')) await loadConfig();
@@ -190,6 +310,7 @@ async function login() {
       );
       await loadFilterOptions();
       await loadTagCloud();
+      await hydratePreferences();
       await renderRecentSearches();
       await renderSavedSearches();
     }
@@ -391,7 +512,7 @@ let _searchState = { offset: 0, hasMore: false, total: 0, loading: false };
 function _currentSearchPayload(offset) {
   return {
     query: query.value,
-    limit: PAGE_SIZE,
+    limit: userPrefs.results_per_page || PAGE_SIZE,
     offset,
     filetype: chipFiletype?.values().join(',') || null,
     path: pathFilter.value || null,
@@ -447,6 +568,16 @@ async function runSearch() {
     const { docs, total, hasMore, nextOffset } = await _fetchSearchPage(0);
     // History is recorded server-side by /api/search; refresh the list.
     renderRecentSearches();
+    // Remember the current filter set as the user's default filters
+    // (fire-and-forget; failures fall back to the local cache).
+    savePreferences({
+      default_filters: {
+        filetype: chipFiletype?.values() ?? [],
+        tags: chipTagFilter?.values() ?? [],
+        path: document.getElementById('pathFilter')?.value || '',
+        block_type: document.getElementById('blockType')?.value || '',
+      },
+    });
 
     _searchState = { offset: nextOffset, hasMore, total, loading: false };
 
@@ -2205,6 +2336,7 @@ function initNav() {
   document.querySelectorAll('.nav-links a').forEach(link => {
     if (link.getAttribute('href') === activeHref) link.classList.add('active');
   });
+  bindPreferenceControls();
 }
 
 function initSearchPage() {
@@ -2240,6 +2372,7 @@ async function bootstrap() {
 
   if (token) {
     showAuthedPanels();
+    await hydratePreferences();
     const role = localStorage.getItem('documentSearchRole') || 'user';
     if (role === 'admin') showAdminUI();
     await loadStatus();
@@ -2257,6 +2390,7 @@ async function bootstrap() {
       );
       await loadFilterOptions();
       await loadTagCloud();
+      await hydratePreferences();
       await renderRecentSearches();
       await renderSavedSearches();
       const q = new URLSearchParams(location.search).get('q');
