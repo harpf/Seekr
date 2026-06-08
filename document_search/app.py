@@ -540,6 +540,14 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 _obs.INDEX_DOCS_TOTAL.labels(outcome="indexed").inc()
             counts["done"] += 1
             progress_cb(dict(counts))
+        webhook_service.enqueue_event(
+            "index.completed",
+            {
+                **counts,
+                "index_job_id": int(payload["_job_id"]) if payload.get("_job_id") else None,
+                "paths": paths,
+            },
+        )
         return counts
 
     @worker.handler("ai_suggest_structure")

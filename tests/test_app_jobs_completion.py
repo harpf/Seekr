@@ -265,4 +265,5 @@ def test_re_enqueue_then_runs(tmp_path):
                 break
             time.sleep(0.03)
         assert app.state.job_store.get(new_id)["state"] == "succeeded"
-        assert done == [{"n": 1}]
+        # The worker injects the running job's id into the payload (additive).
+        assert done == [{"n": 1, "_job_id": new_id}]

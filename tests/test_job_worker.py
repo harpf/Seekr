@@ -30,7 +30,9 @@ def test_register_and_tick_runs_handler(setup):
     worker.wait_until_idle(timeout=2.0)
     job = js.get(job_id)
     assert job["state"] == "succeeded"
-    assert calls == [{"hello": "world"}]
+    # The worker injects the running job's id into the payload so handlers that
+    # need it (e.g. webhook fan-out) can reference it; other handlers ignore it.
+    assert calls == [{"hello": "world", "_job_id": job_id}]
 
 
 def test_handler_exception_marks_failed_when_no_retries(setup):

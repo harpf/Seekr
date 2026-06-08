@@ -142,6 +142,7 @@ class Worker:
                 return
             import json
             payload = json.loads(job["payload_json"])
+            payload["_job_id"] = job_id
 
             def progress_cb(p: dict) -> None:
                 self.job_store.update_progress(job_id, p)
