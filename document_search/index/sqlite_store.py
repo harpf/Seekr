@@ -240,6 +240,30 @@ class SqliteStore:
               updated_at TEXT NOT NULL,
               FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS webhooks (
+              id INTEGER PRIMARY KEY,
+              url TEXT NOT NULL,
+              event_type TEXT NOT NULL,
+              secret TEXT NOT NULL,
+              enabled INTEGER NOT NULL DEFAULT 1,
+              created_by INTEGER,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_webhooks_event   ON webhooks(event_type, enabled);
+            CREATE TABLE IF NOT EXISTS webhook_deliveries (
+              id INTEGER PRIMARY KEY,
+              webhook_id INTEGER NOT NULL,
+              job_id INTEGER,
+              event_type TEXT NOT NULL,
+              status_code INTEGER,
+              success INTEGER NOT NULL DEFAULT 0,
+              error_message TEXT,
+              attempted_at TEXT NOT NULL,
+              FOREIGN KEY (webhook_id) REFERENCES webhooks(id) ON DELETE CASCADE,
+              FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_wh_deliveries_hook ON webhook_deliveries(webhook_id);
             """
         )
         # Migration: add role column for existing databases
