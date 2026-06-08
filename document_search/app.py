@@ -6,6 +6,7 @@ import html
 import ipaddress
 import json
 import logging
+import mimetypes
 import os
 import posixpath
 import re
@@ -713,6 +714,36 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             _thread_local.db.ensure_default_admin()
             _thread_local.initialized = True
         return _thread_local.db
+
+    # ── Document preview support ──────────────────────────────────────
+    MAX_PREVIEW_BLOCKS = 200
+    # extension (lowercase, with dot) → preview_kind the frontend dispatches on.
+    _PREVIEW_KINDS: dict[str, str] = {
+        ".pdf": "pdf",
+        ".png": "image", ".jpg": "image", ".jpeg": "image",
+        ".gif": "image", ".webp": "image", ".bmp": "image", ".svg": "image",
+        ".txt": "text", ".md": "text", ".markdown": "text",
+        ".log": "text", ".csv": "text",
+    }
+    # MIME overrides for types stdlib mimetypes gets wrong / leaves blank on Windows.
+    _MIME_OVERRIDES: dict[str, str] = {
+        ".md": "text/markdown; charset=utf-8",
+        ".markdown": "text/markdown; charset=utf-8",
+        ".txt": "text/plain; charset=utf-8",
+        ".log": "text/plain; charset=utf-8",
+        ".csv": "text/csv; charset=utf-8",
+        ".svg": "image/svg+xml",
+    }
+
+    def _preview_kind(extension: str) -> str:
+        return _PREVIEW_KINDS.get((extension or "").lower(), "unsupported")
+
+    def _preview_mime(extension: str) -> str:
+        ext = (extension or "").lower()
+        if ext in _MIME_OVERRIDES:
+            return _MIME_OVERRIDES[ext]
+        guessed, _enc = mimetypes.guess_type("x" + ext)
+        return guessed or "application/octet-stream"
 
     import logging as _logging
     _audit_log = _logging.getLogger("seekr.audit")
@@ -2906,6 +2937,35 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             acl_params,
         ).fetchone()[0]
         return {"documents": docs, "content_blocks": blocks, "total_file_size_bytes": total_size, "db_path": db_path}
+
+    @app.get("/api/files/preview-text")
+    def api_files_preview_text(document_id: int, x_auth_token: str | None = Header(default=None)):
+        user_id = require_user(x_auth_token)
+        db = store()
+        doc = db.get_document_by_id(document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if not db.user_can_read_document(user_id, document_id):
+            # Do not leak existence: same 404 as a missing document.
+            raise HTTPException(status_code=404, detail="Document not found")
+        rows = db.conn.execute(
+            "SELECT block_type, block_number, text FROM content_blocks "
+            "WHERE document_id=? ORDER BY block_number LIMIT ?",
+            (document_id, MAX_PREVIEW_BLOCKS + 1),
+        ).fetchall()
+        truncated = len(rows) > MAX_PREVIEW_BLOCKS
+        blocks = [
+            {"block_type": r["block_type"], "block_number": r["block_number"], "text": r["text"]}
+            for r in rows[:MAX_PREVIEW_BLOCKS]
+        ]
+        return {
+            "document_id": document_id,
+            "filename": doc["filename"],
+            "extension": doc["extension"],
+            "preview_kind": _preview_kind(doc["extension"]),
+            "blocks": blocks,
+            "truncated": truncated,
+        }
 
     @app.get("/api/files/open")
     def api_files_open(document_id: int, request: Request, x_auth_token: str | None = Header(default=None)):
