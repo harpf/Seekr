@@ -28,6 +28,58 @@
   --sh: 0 1px 4px rgba(0, 0, 0, .06);
 }
 
+/* ── Dark theme tokens ────────────────────────────── */
+/* Applied when <html data-theme="dark"> (toggle or prefers-color-scheme). */
+[data-theme="dark"] {
+  --bg:       #0f172a;
+  --surface:  #1e293b;
+  --overlay:  #334155;
+  --elevated: #1e293b;
+  --bg-2:     #334155;
+  --b-lo:     #334155;
+  --b-md:     #475569;
+  --b-hi:     #64748b;
+
+  --txt-1: #f1f5f9;
+  --txt-2: #cbd5e1;
+  --txt-3: #94a3b8;
+
+  --blue:    #3b82f6;
+  --blue-dk: #2563eb;
+  --blue-a:  #1e3a5f;
+  --green:   #22c55e;
+  --amber:   #f59e0b;
+  --red:     #ef4444;
+
+  --sh: 0 1px 4px rgba(0, 0, 0, .4);
+}
+
+/* Honour the OS preference until the user explicitly chooses a theme.
+   app.js sets data-theme on <html> before paint when a saved choice exists;
+   this block covers first paint / no-JS / no-saved-choice. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:       #0f172a;
+    --surface:  #1e293b;
+    --overlay:  #334155;
+    --elevated: #1e293b;
+    --bg-2:     #334155;
+    --b-lo:     #334155;
+    --b-md:     #475569;
+    --b-hi:     #64748b;
+    --txt-1: #f1f5f9;
+    --txt-2: #cbd5e1;
+    --txt-3: #94a3b8;
+    --blue:    #3b82f6;
+    --blue-dk: #2563eb;
+    --blue-a:  #1e3a5f;
+    --green:   #22c55e;
+    --amber:   #f59e0b;
+    --red:     #ef4444;
+    --sh: 0 1px 4px rgba(0, 0, 0, .4);
+  }
+}
+
 /* ── Reset ────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
@@ -641,4 +693,117 @@ code {
   height: 100%; border-radius: 3px;
   background: var(--blue); width: 0%;
   transition: width .3s ease;
+}
+
+/* ── Accessibility: visible focus ring (WCAG 2.4.7) ── */
+/* Keyboard focus only — :focus-visible avoids rings on mouse clicks. */
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: var(--r1);
+}
+/* Inputs already show a box-shadow on :focus; add the keyboard ring too. */
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+/* Remove the legacy outline:none from .topbar/buttons that suppressed focus. */
+a:focus-visible, button:focus-visible, .btn:focus-visible,
+.tab:focus-visible, .nav-links a:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+/* ── Screen-reader-only content (visually hidden, still announced) ── */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Skip link (first tab stop) ── */
+.skip-link {
+  position: absolute; left: -999px; top: 0; z-index: 10000;
+  background: var(--blue); color: #fff;
+  padding: .5rem 1rem; border-radius: var(--r2);
+  text-decoration: none; font-weight: 600;
+}
+.skip-link:focus { left: .5rem; top: .5rem; }
+
+/* ── Theme toggle button (topbar) ── */
+.theme-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; flex-shrink: 0;
+  color: var(--txt-2); background: none;
+  border: 1px solid var(--b-lo); border-radius: var(--r2);
+  cursor: pointer; transition: color .12s, background .12s, border-color .12s;
+}
+.theme-toggle:hover { color: var(--txt-1); background: var(--overlay); }
+.theme-toggle svg { width: 16px; height: 16px; }
+/* Show the correct glyph for the active theme. */
+.theme-toggle .icon-moon { display: none; }
+.theme-toggle .icon-sun  { display: block; }
+[data-theme="dark"] .theme-toggle .icon-moon { display: block; }
+[data-theme="dark"] .theme-toggle .icon-sun  { display: none; }
+
+/* ── Loading skeletons ── */
+.skeleton {
+  background: linear-gradient(90deg,
+    var(--overlay) 25%, var(--bg-2) 37%, var(--overlay) 63%);
+  background-size: 400% 100%;
+  border-radius: var(--r2);
+  animation: skeleton-shimmer 1.4s ease infinite;
+}
+.skeleton-line   { height: .8rem; margin: .4rem 0; }
+.skeleton-card   { height: 92px; margin-bottom: .75rem; }
+.skeleton-w-40   { width: 40%; }
+.skeleton-w-60   { width: 60%; }
+.skeleton-w-80   { width: 80%; }
+@keyframes skeleton-shimmer {
+  0%   { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+/* ── Error state (mirrors .empty but signals failure) ── */
+.error-state     { text-align: center; padding: 3rem 1.5rem; color: var(--red); }
+.error-state svg { width: 34px; height: 34px; margin: 0 auto .6rem; opacity: .5; display: block; }
+.error-state p   { font-size: .9rem; }
+
+/* ── Inline-style replacements: layout/utility helpers ── */
+/* Single-column form grid (was style="grid-template-columns:1fr") */
+.f-grid-1     { grid-template-columns: 1fr; }
+/* Flex helpers (replace ad-hoc inline display:flex …) */
+.row          { display: flex; align-items: center; gap: .5rem; }
+.row-between  { display: flex; align-items: center; justify-content: space-between; }
+.row-wrap     { display: flex; flex-wrap: wrap; gap: .4rem; }
+.col-gap-sm   { display: flex; flex-direction: column; gap: .5rem; }
+.mt-sm        { margin-top: .875rem; }
+.mb-sm        { margin-bottom: .75rem; }
+.full-span    { grid-column: 1 / -1; }
+/* Eyebrow label used by tag-cloud / filters header */
+.eyebrow {
+  font-size: .75rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .05em; color: var(--txt-3);
+}
+/* Section header with a top border (was the "Optional filters" inline block) */
+.section-divider {
+  margin-top: .875rem; display: flex; align-items: center;
+  border-top: 1px solid var(--b-lo); padding-top: .75rem;
+}
+.ml-auto      { margin-left: auto; }
+.text-danger  { color: var(--red); }
+.font-sm      { font-size: .82rem; }
+
+/* ── Reduced motion (WCAG 2.3.3) ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
