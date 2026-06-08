@@ -27,6 +27,7 @@
     .wiki-content td { padding:.4rem .6rem; border-bottom:1px solid var(--b-lo); color:var(--txt-2); vertical-align:top; }
     .wiki-content .callout { background:var(--blue-a); border-left:3px solid var(--blue); border-radius:0 8px 8px 0; padding:.6rem .9rem; margin:.6rem 0; font-size:.85rem; color:var(--txt-2); }
     .wiki-content .callout.warn { background:#fef9c3; border-left-color:var(--amber); }
+    .wiki-content .wiki-note { background:var(--blue-a); border-left:3px solid var(--blue); border-radius:0 8px 8px 0; padding:.6rem .9rem; margin:.6rem 0; font-size:.85rem; color:var(--txt-2); }
     .wiki-section { scroll-margin-top:1rem; }
     .wiki-badge { display:inline-block; background:var(--blue); color:#fff; font-size:.7rem; font-weight:700; border-radius:3px; padding:.1em .4em; vertical-align:middle; margin-left:.3rem; }
     .wiki-badge.get  { background:#16a34a; }
@@ -244,6 +245,9 @@
             <h3 id="api-auth">Authentication</h3>
             <p>All UI endpoints require an <code>X-Auth-Token</code> header obtained from <code>POST /api/login</code>. Tokens expire after 8 hours.</p>
             <p>Home Assistant endpoints (<code>/api/ha/*</code>) use <code>X-Api-Key</code> instead — no login required.</p>
+            <div class="wiki-note">
+              <strong>API versioning.</strong> Every endpoint is served under both <code>/api/&hellip;</code> and the versioned <code>/api/v1/&hellip;</code> prefix. <strong><code>/api/v1</code> is the stable contract</strong> — prefer it in new integrations. The bare <code>/api/&hellip;</code> prefix is retained for backward compatibility. See <a href="/docs" target="_blank" rel="noopener">/docs</a> for the full per-version reference.
+            </div>
 
             <h3 id="api-search">Search Endpoints</h3>
             <table>

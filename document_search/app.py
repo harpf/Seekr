@@ -27,6 +27,7 @@ except ImportError:
     _psutil = None  # type: ignore[assignment]
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -98,6 +99,13 @@ _update_job: dict = {"status": "idle"}
 # Path guard — filesystem roots that must never be indexed.
 _BLOCKED_EXACT = {"/", "/proc", "/sys", "/dev"}
 _BLOCKED_PREFIXES = ("/proc/", "/sys/", "/dev/")
+
+# REST API versioning. Every /api/* route is also served under /api/v1/* via an
+# ASGI scope-rewrite middleware (no route duplication). /api/v1 is the stable
+# contract; the bare /api prefix is kept for backward compatibility.
+API_VERSION = "v1"
+_API_PREFIX = "/api"
+_API_V1_PREFIX = "/api/v1"
 
 
 def _check_api_key(key: str | None) -> bool:
@@ -324,6 +332,7 @@ def _recommend_tier(available_ram_gb: float) -> dict:
 
 _OPENAPI_TAGS = [
     {"name": "auth",   "description": "Login and session"},
+    {"name": "documents", "description": "Document marks, tags, and reindexing"},
     {"name": "search", "description": "Full-text document search"},
     {"name": "index",  "description": "Crawl and indexing jobs"},
     {"name": "ha",     "description": "Home Assistant integration — authenticate with `X-Api-Key` header"},
@@ -855,6 +864,32 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     app.add_middleware(_PrometheusMiddleware)
 
+    # ── API versioning (scope rewrite) ─────────────────────────────────
+    class _VersionRewrite:
+        """Raw-ASGI middleware: serve every /api/* route ALSO under /api/v1/*.
+
+        Rewrites an incoming /api/v1/... request path to /api/... in-place on a
+        copied scope BEFORE routing and BEFORE the metrics middleware reads the
+        route label. Registered LAST (so it is the OUTERMOST middleware and runs
+        FIRST). No route duplication, no redirect — the bare /api/* paths are
+        unchanged and remain backward compatible.
+        """
+
+        def __init__(self, app):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] == "http":
+                path = scope.get("path", "")
+                if path == _API_V1_PREFIX or path.startswith(_API_V1_PREFIX + "/"):
+                    scope = dict(scope)
+                    new_path = _API_PREFIX + path[len(_API_V1_PREFIX):]
+                    scope["path"] = new_path
+                    scope["raw_path"] = new_path.encode("latin-1")
+            await self.app(scope, receive, send)
+
+    app.add_middleware(_VersionRewrite)
+
     # ── Auth helpers ───────────────────────────────────────────────────
     def _evict_stale_failures(now: float) -> None:
         """Drop IP keys whose failures have all aged out, and enforce a cap."""
@@ -1009,7 +1044,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         )
         return {"status": "saved", "path": str(config_path)}
 
-    @app.post("/api/login")
+    @app.post("/api/login", tags=["auth"])
     def api_login(req: LoginRequest, request: Request):
         ip = request.client.host if request.client else "unknown"
         _check_rate_limit(ip)
@@ -1025,7 +1060,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         sessions[token] = (user["id"], time.time(), role)
         return {"token": token, "username": user["username"], "role": role}
 
-    @app.get("/api/me")
+    @app.get("/api/me", tags=["auth"])
     def api_me(x_auth_token: str | None = Header(default=None)):
         if not x_auth_token or x_auth_token not in sessions:
             raise HTTPException(status_code=401, detail="Unauthorized")
@@ -1044,7 +1079,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             "preferences": db.get_preferences(user_id),
         }
 
-    @app.post("/api/documents/mark")
+    @app.post("/api/documents/mark", tags=["documents"])
     def api_mark(req: MarkRequest, x_auth_token: str | None = Header(default=None)):
         user_id = require_user(x_auth_token)
         db = store()
@@ -1055,7 +1090,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         db.set_mark(user_id, req.document_id, req.is_marked)
         return {"status": "ok"}
 
-    @app.post("/api/documents/tags")
+    @app.post("/api/documents/tags", tags=["documents"])
     def api_tags(req: TagsRequest, x_auth_token: str | None = Header(default=None)):
         user_id = require_user(x_auth_token)
         db = store()
@@ -1066,7 +1101,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         db.set_tags(user_id, req.document_id, req.tags)
         return {"status": "ok"}
 
-    @app.get("/api/tags")
+    @app.get("/api/tags", tags=["documents"])
     def api_list_tags(x_auth_token: str | None = Header(default=None)):
         user_id = require_user(x_auth_token)
         db = store()
@@ -1087,7 +1122,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         update = req.model_dump(exclude_none=True)
         return db.set_preferences(user_id, update)
 
-    @app.post("/api/documents/{document_id}/reindex")
+    @app.post("/api/documents/{document_id}/reindex", tags=["documents"])
     def api_reindex_document(document_id: int, request: Request, x_auth_token: str | None = Header(default=None)):
         user_id = require_user(x_auth_token)
         db = store()
@@ -2893,6 +2928,50 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             request=request,
         )
         return FileResponse(p)
+
+    # ── Custom OpenAPI: mirror /api/* into /api/v1/* ───────────────────
+    _VERSIONING_NOTE = (
+        "\n\n**API versioning.** Every `/api/*` endpoint is also served under "
+        "`/api/v1/*`. `/api/v1` is the stable contract — prefer it. The bare "
+        "`/api/*` prefix is retained for backward compatibility."
+    )
+
+    def _custom_openapi() -> dict:
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=(app.description or "") + _VERSIONING_NOTE,
+            routes=app.routes,
+            tags=app.openapi_tags,
+        )
+        deprecation_note = (
+            "\n\n**Deprecated path prefix.** Prefer `/api/v1/...` — the bare "
+            "`/api/...` prefix is retained only for backward compatibility."
+        )
+        paths = schema.get("paths", {})
+        mirrored: dict = {}
+        for path, item in paths.items():
+            if not path.startswith(_API_PREFIX + "/") and path != _API_PREFIX:
+                continue
+            v1_path = _API_V1_PREFIX + path[len(_API_PREFIX):]
+            # Deep-copy the path item so v1 ops are independent of legacy ops.
+            v1_item = json.loads(json.dumps(item))
+            for _method, op in v1_item.items():
+                if isinstance(op, dict) and "operationId" in op:
+                    op["operationId"] = f"{op['operationId']}_v1"
+            mirrored[v1_path] = v1_item
+            # Append the deprecation note to the LEGACY op (in place, AFTER the
+            # deep copy, so it never leaks into the v1 mirror).
+            for _method, op in item.items():
+                if isinstance(op, dict) and "responses" in op:
+                    op["description"] = (op.get("description") or "") + deprecation_note
+        paths.update(mirrored)
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = _custom_openapi
 
     return app
 
