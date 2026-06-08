@@ -274,3 +274,57 @@ def test_import_is_idempotent_on_path(tmp_path, store):
         "SELECT COUNT(*) FROM documents WHERE path='/d/report.pdf'"
     ).fetchone()[0]
     assert count == 1
+
+
+def test_import_owner_only_doc_is_not_publicized(tmp_path, store):
+    """An owner-based doc (owner set, no document_acl row) must NOT become
+    public after import: _backfill_acl publicizes any ACL-less doc, so import
+    grants the owner an explicit read to keep it private."""
+    from datetime import UTC, datetime
+
+    now = datetime.now(tz=UTC).isoformat()
+    alice = store.create_user("alice", "pw-alice")
+    alice_p = store.conn.execute(
+        "SELECT principal_id FROM users WHERE id=?", (alice,)
+    ).fetchone()["principal_id"]
+    cur = store.conn.execute(
+        "INSERT INTO documents(path, filename, extension, file_size, modified_at, "
+        "sha256, indexed_at, status, owner_principal_id) VALUES(?,?,?,?,?,?,?,?,?)",
+        ("/d/secret.pdf", "secret.pdf", ".pdf", 9, now, "h-sec", now, "ok", alice_p),
+    )
+    store.conn.execute("DELETE FROM document_acl WHERE document_id=?", (cur.lastrowid,))
+    store.conn.commit()
+
+    svc = BackupService(store, backup_dir=tmp_path / "b", keep=14)
+    archive = tmp_path / "export.zip"
+    svc.export_archive(archive)
+
+    target_path = tmp_path / "target.db"
+    target = SqliteStore(target_path)
+    target.create_user("alice", "pw-alice")
+    BackupService(target, backup_dir=tmp_path / "tb", keep=14).import_archive(archive)
+
+    doc_id = target.conn.execute(
+        "SELECT id FROM documents WHERE path='/d/secret.pdf'"
+    ).fetchone()["id"]
+    # Not ACL-less -> _backfill_acl can't publicize it.
+    acl_count = target.conn.execute(
+        "SELECT COUNT(*) FROM document_acl WHERE document_id=?", (doc_id,)
+    ).fetchone()[0]
+    assert acl_count >= 1
+
+    def _public_can_read(s):
+        pub = s.conn.execute(
+            "SELECT id FROM principals WHERE type='group' AND external_id='public'"
+        ).fetchone()
+        if not pub:
+            return False
+        return s.conn.execute(
+            "SELECT 1 FROM document_acl WHERE document_id=? AND principal_id=? "
+            "AND permission='read'",
+            (doc_id, pub["id"]),
+        ).fetchone() is not None
+
+    assert not _public_can_read(target)
+    # Reopen -> _backfill_acl runs; the owner-based doc must STILL not be public.
+    assert not _public_can_read(SqliteStore(target_path))

@@ -31,6 +31,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
@@ -2818,10 +2819,19 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         require_admin(x_auth_token)
         out_path = Path(tempfile.gettempdir()) / f"seekr_export_{uuid.uuid4().hex}.zip"
         backup_service.export_archive(out_path)
+
+        def _cleanup() -> None:
+            # The export holds all docs + ACLs; don't leave it in the temp dir.
+            try:
+                out_path.unlink()
+            except OSError:
+                pass
+
         return FileResponse(
             out_path,
             media_type="application/zip",
             filename="seekr_export.zip",
+            background=BackgroundTask(_cleanup),
         )
 
     @app.post("/api/backup/import")

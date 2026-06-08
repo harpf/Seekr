@@ -281,6 +281,7 @@ class BackupService:
 
         # 2. documents: path -> target document id
         doc_map: dict[int, int] = {}
+        newly_inserted_docs: set[int] = set()
         doc_cols = (
             "path", "filename", "extension", "mime_type", "file_size",
             "modified_at", "created_at", "sha256", "indexed_at", "status",
@@ -304,6 +305,7 @@ class BackupService:
                 values,
             )
             doc_map[d["id"]] = cur.lastrowid
+            newly_inserted_docs.add(cur.lastrowid)
             imported["documents"] += 1
 
         # 3. content_blocks (+ FTS) for newly-imported docs only
@@ -400,6 +402,30 @@ class BackupService:
                 (tgt_doc, tgt_principal, a["permission"], a.get("granted_at") or now),
             )
             imported["document_acl"] += 1
+
+        # 8. Safety: a freshly-imported document must never be left ACL-less.
+        #    SqliteStore._backfill_acl grants the `public` group read on any doc
+        #    with zero document_acl rows on the next store construction — so an
+        #    imported doc whose ACL principals didn't remap (owner-based
+        #    visibility, or a partial/tampered archive) would be silently
+        #    published. Grant its owner an explicit read so it stays private.
+        #    (Genuinely-public docs keep their public ACL row, which remaps via
+        #    the exported `public` principal, so this is a no-op for them.)
+        for tgt_doc in newly_inserted_docs:
+            has_acl = conn.execute(
+                "SELECT 1 FROM document_acl WHERE document_id=?", (tgt_doc,)
+            ).fetchone()
+            if has_acl:
+                continue
+            owner = conn.execute(
+                "SELECT owner_principal_id FROM documents WHERE id=?", (tgt_doc,)
+            ).fetchone()[0]
+            if owner is not None:
+                conn.execute(
+                    "INSERT OR IGNORE INTO document_acl(document_id, principal_id, "
+                    "permission, granted_at) VALUES(?,?, 'read', ?)",
+                    (tgt_doc, owner, now),
+                )
 
         conn.commit()
         return {"imported": imported}
