@@ -260,6 +260,12 @@ class HaSearchRequest(BaseModel):
     query: str = Field(min_length=1)
     limit: int = Field(default=5, ge=1, le=20)
 
+
+class WebhookCreateRequest(BaseModel):
+    url: str = Field(min_length=1)
+    event_type: str
+    secret: str | None = None
+
 class MarkRequest(BaseModel):
     document_id: int
     is_marked: bool = True
@@ -399,6 +405,10 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     worker.handler = _counting_handler  # type: ignore[method-assign]
 
+    from document_search.services.webhook_service import WebhookService
+    webhook_service = WebhookService(_startup_db, job_store)
+    app.state.webhook_service = webhook_service
+
     from document_search.services.backup_service import BackupService
     # Pass backup_dir explicitly (built with os.path string ops, not Path.parent)
     # so create_app stays robust if os.name is monkeypatched elsewhere: pathlib's
@@ -475,6 +485,13 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     @app.on_event("shutdown")
     def _stop_backup_scheduler() -> None:
         _backup_scheduler_stop.set()
+
+    @worker.handler("webhook_deliver")
+    def _handle_webhook_deliver(payload: dict, progress_cb):
+        from document_search.services.webhook_service import WebhookService
+        svc = WebhookService(SqliteStore(Path(db_path)), job_store)
+        svc.deliver(payload, job_id=payload.get("_job_id"))
+        return {"delivered": True}
 
     @worker.handler("index_paths")
     def _handle_index_paths(payload: dict, progress_cb):
