@@ -107,6 +107,12 @@ function applyTheme(theme) {
   }
 }
 
+// Flash-free theme: paint the cached theme at parse time, before the
+// network round-trip (and before most of the page renders), so a reload
+// in dark mode never flashes the light palette. Uses the same offline
+// cache (`userPrefs`) — no competing theme store.
+applyTheme(userPrefs.theme);
+
 // Merge `prefs` into userPrefs, persist to the offline cache, apply the
 // theme, and (if on the search page with chips constructed) pre-fill the
 // filter chips/inputs from default_filters. Idempotent — safe to call
@@ -233,13 +239,52 @@ function setText(id, message, type = '') {
   if (type) node.classList.add(type);
 }
 
+// ── Loading skeletons & error states ───────────────────────────────
+// Result-card skeletons for the search results region.
+function skeletonResults(n = 3) {
+  let html = '';
+  for (let i = 0; i < n; i++) {
+    html += `<div class="rc" aria-hidden="true">
+      <div class="skeleton skeleton-line skeleton-w-40"></div>
+      <div class="skeleton skeleton-line skeleton-w-80"></div>
+      <div class="skeleton skeleton-line skeleton-w-60"></div>
+    </div>`;
+  }
+  return html;
+}
+
+// Plain shimmer lines for tables/grids (users, etc.).
+function skeletonLines(n = 3) {
+  let html = '';
+  for (let i = 0; i < n; i++) {
+    html += '<div class="skeleton skeleton-line skeleton-w-80" aria-hidden="true"></div>';
+  }
+  return html;
+}
+
+// Inline error panel (announced — role="alert").
+function errorState(message) {
+  return `<div class="error-state" role="alert">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <p>${escHtml(message)}</p>
+  </div>`;
+}
+
 // ── Toast notifications ────────────────────────────────────────────
 function showToast(msg, type = 'info', duration = 3500) {
   const wrap = document.getElementById('toastWrap');
   if (!wrap) return;
   const t = document.createElement('div');
   t.className = `toast ${type}`;
-  t.innerHTML = `<div class="toast-dot"></div><span>${escHtml(msg)}</span>`;
+  // Errors are assertive ('alert'); everything else is polite ('status').
+  // The #toastWrap is the aria-live region; this role sharpens the cue.
+  t.setAttribute('role', type === 'err' ? 'alert' : 'status');
+  const dot = document.createElement('div');
+  dot.className = 'toast-dot';
+  const span = document.createElement('span');
+  span.textContent = msg;   // textContent → exact, safe announce text
+  t.appendChild(dot);
+  t.appendChild(span);
   wrap.appendChild(t);
   setTimeout(() => {
     t.style.opacity = '0'; t.style.transition = 'opacity .25s';
@@ -489,6 +534,8 @@ function toggleFilters() {
   const willOpen = body.classList.contains('hidden');
   body.classList.toggle('hidden', !willOpen);
   btn.classList.toggle('open', willOpen);
+  btn.setAttribute('aria-expanded', String(willOpen));
+  body.setAttribute('aria-hidden', String(!willOpen));
   btn.querySelector('.ft-lbl').textContent = willOpen ? 'Hide filters' : 'Show filters';
 }
 
@@ -562,6 +609,12 @@ function _updateLoadMore() {
 
 async function runSearch() {
   const resultsEl = document.getElementById('results');
+  // Announce the fresh-search load and show placeholder skeletons while the
+  // first page is in flight. aria-busy is cleared on every exit path below.
+  if (resultsEl) {
+    resultsEl.setAttribute('aria-busy', 'true');
+    resultsEl.innerHTML = skeletonResults(3);
+  }
   try {
     _searchState.loading = true;
     _updateLoadMore();
@@ -596,16 +649,21 @@ async function runSearch() {
           </svg>
           <p>No results found for this query.</p>
         </div>`;
+      resultsEl.removeAttribute('aria-busy');
       _updateLoadMore();
       return;
     }
 
     renderResults(docs, false);
+    if (resultsEl) resultsEl.removeAttribute('aria-busy');
     _updateLoadMore();
   } catch (e) {
     _searchState = { offset: 0, hasMore: false, total: 0, loading: false };
     _updateLoadMore();
-    if (resultsEl) resultsEl.textContent = e.message;
+    if (resultsEl) {
+      resultsEl.removeAttribute('aria-busy');
+      resultsEl.innerHTML = errorState(e.message);
+    }
   }
 }
 
@@ -1341,11 +1399,19 @@ async function unmountShare() {
 
 // ── User management ────────────────────────────────────────────────
 async function loadUsers() {
+  const el = document.getElementById('userTable');
+  if (el) {
+    el.setAttribute('aria-busy', 'true');
+    el.innerHTML = skeletonLines(4);
+  }
   try {
     const users = await api('/api/users');
     renderUserTable(users);
   } catch (e) {
     setText('usersResult', e.message, 'err');
+    if (el) el.innerHTML = errorState(e.message);
+  } finally {
+    if (el) el.removeAttribute('aria-busy');
   }
 }
 
@@ -2358,6 +2424,20 @@ function initSearchPage() {
   // Enter to run search
   queryEl.addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
 
+  // Escape: close the filter panel (and return focus to its toggle) if it's
+  // open; otherwise blur the query box.
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    const body = document.getElementById('filterBody');
+    const toggle = document.getElementById('filterToggle');
+    if (body && !body.classList.contains('hidden')) {
+      toggleFilters();
+      toggle?.focus();
+    } else if (document.activeElement === queryEl) {
+      queryEl.blur();
+    }
+  });
+
   // Load more pager
   document.getElementById('loadMoreBtn')?.addEventListener('click', loadMoreResults);
 }
@@ -2365,6 +2445,16 @@ function initSearchPage() {
 async function bootstrap() {
   initNav();
   renderRecentSearches();
+
+  // Global Escape: dismiss any open dismissable card (AI suggestion after
+  // upload, or the change-password panel). No-ops when none are open.
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    const aiCard = document.getElementById('aiSuggestionCard');
+    if (aiCard && !aiCard.classList.contains('hidden')) dismissAiSuggestion();
+    const pwCard = document.getElementById('changePwCard');
+    if (pwCard && !pwCard.classList.contains('hidden')) cancelChangePassword();
+  });
 
   if (document.body?.dataset?.page === 'search') {
     initSearchPage();
@@ -2428,7 +2518,10 @@ async function loadTagCloud() {
         ${escHtml(t.name)}<span class="tag-chip-count">${t.count}</span>
       </button>`
     ).join('');
-  } catch (_) {}
+  } catch (e) {
+    card.classList.remove('hidden');
+    cloud.innerHTML = errorState('Could not load tags');
+  }
 }
 
 async function loadFilterOptions() {

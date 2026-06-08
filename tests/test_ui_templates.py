@@ -8,6 +8,10 @@ def _css() -> str:
     return (STATIC / "styles.css").read_text(encoding="utf-8")
 
 
+def _js() -> str:
+    return (STATIC / "app.js").read_text(encoding="utf-8")
+
+
 def test_dark_theme_token_block_exists():
     css = _css()
     assert '[data-theme="dark"]' in css, "dark theme token block missing"
@@ -67,3 +71,26 @@ def test_toast_wrap_is_live_region_in_templates():
         html = (TEMPLATES / name).read_text(encoding="utf-8")
         assert 'id="toastWrap"' in html, f"{name} missing toast wrap"
         assert 'aria-live="polite"' in html, f"{name} toast wrap not a live region"
+
+
+def test_theme_mechanism_present():
+    js = _js()
+    # Theme is applied via data-theme, persisted via the prefs cache, and the
+    # #themeToggle button is wired by bindPreferenceControls.
+    assert "data-theme" in js, "app.js never sets data-theme"
+    assert "seekr_prefs" in js, "theme/prefs not cached in localStorage"
+    assert "applyTheme" in js, "applyTheme() missing"
+    assert "bindPreferenceControls" in js, "theme toggle not bound"
+
+
+def test_app_js_has_escape_and_aria():
+    js = _js()
+    assert "Escape" in js, "no Escape-to-close handler in app.js"
+    assert "aria-expanded" in js, "aria-expanded not toggled in app.js"
+
+
+def test_loading_and_error_helpers_present():
+    js = _js()
+    assert "skeletonResults" in js, "skeletonResults() helper missing"
+    assert "error-state" in js, "error-state markup missing"
+    assert 'role="alert"' in js, "errorState not announced (role=alert)"
