@@ -42,7 +42,7 @@ Workflow for any optimisation:
 | status.blocks  | 15.5  | `/api/status` block count |
 | status.size    | 7.4   | `/api/status` size sum |
 | count.browse   | 13.1  | total count for an empty query |
-| **count.fts**  | **285** | total count for a broad keyword query |
+| count.fts      | 19    | total count for a broad keyword query — **capped** (was 285 ms exact) |
 | **search.broad** | **250** | keyword search matching ~every doc (worst case) |
 | search.rare    | 8.8   | selective keyword search |
 
@@ -58,6 +58,10 @@ values across machines.
 - **Cheaper total-count** (`perf(search)`): browse count uses an indexed
   `EXISTS` instead of `JOIN content_blocks` + `COUNT(DISTINCT)`; the FTS count
   dropped an unused `content_blocks` join.
+- **Capped total-count** (`perf(search)`): `count_documents(cap=N)` stops at
+  `N+1` distinct docs, so a broad query's total is ~25× cheaper (480 ms → 19 ms
+  at 20k docs). `/api/search` uses `SEARCH_TOTAL_CAP = 1000` and returns
+  `X-Total-Approx`; the UI renders "1000+" when exceeded.
 - **Tuned SQLite connection**: WAL, `synchronous=NORMAL`, 32 MB page cache,
   256 MB mmap, `temp_store=MEMORY`, `busy_timeout=5000` (already in place).
 
@@ -65,7 +69,6 @@ values across machines.
 
 | candidate | measured cost | expected after | tradeoff |
 |---|---|---|---|
-| **Capped total-count** for broad FTS queries (count distinct docs up to N, show "N+") | count.fts 285 ms | a few ms | `X-Total-Count` becomes approximate (e.g. "200+"), like web search engines — a UX change |
 | **search.broad** (BM25 over a term in ~every doc) | 250 ms | hard to reduce | inherent to ranking all matches; selective queries are already ~9 ms. Possible: cap candidate set, or a `rank`-bounded query |
 | **External-content FTS5** (drop the duplicated text column) | — (storage) | ~½ DB size | one-time migration; rebuilds the FTS index |
 | **Semantic/hybrid search at scale** | brute-force cosine, no ANN | — | needs `sqlite-vec`/FAISS; only relevant once embeddings are enabled on a large corpus |

@@ -342,6 +342,13 @@ _OPENAPI_TAGS = [
 ]
 
 
+# Search total-count is capped at this many distinct documents: exact below it,
+# rendered as "<cap>+" above it. Counting every match of a broad query (a term in
+# most documents) is the dominant search cost; capping keeps it cheap. See
+# docs/PERFORMANCE.md.
+SEARCH_TOTAL_CAP = 1000
+
+
 def create_app(db_path: str = "./document_index.db") -> FastAPI:
     configure_logging()
     config_path = Path(os.getenv("DOCUMENT_SEARCH_CONFIG_PATH", "./config.json"))
@@ -2819,7 +2826,9 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             embedder.model = cfg.embed_model
         try:
             rows = search(db, req.query, limit, offset, req.filetype, req.path, req.block_type, req.modified_from, req.modified_to, req.tags, user_id, mode=mode, embed_fn=embed_fn, bm25_weight=cfg.bm25_weight, vector_weight=cfg.vector_weight)
-            total = count_documents(db, req.query, req.filetype, req.path, req.block_type, req.modified_from, req.modified_to, req.tags, user_id)
+            raw_total = count_documents(db, req.query, req.filetype, req.path, req.block_type, req.modified_from, req.modified_to, req.tags, user_id, cap=SEARCH_TOTAL_CAP)
+            total_approx = raw_total > SEARCH_TOTAL_CAP
+            total = SEARCH_TOTAL_CAP if total_approx else raw_total
         except FtsQueryError:
             raise HTTPException(400, "Could not parse your search query. Check quotes and operators.")
         except sqlite3.OperationalError as e:
@@ -2864,9 +2873,10 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
         has_more = len(rows) >= limit
         response.headers["X-Total-Count"] = str(total)
+        response.headers["X-Total-Approx"] = "true" if total_approx else "false"
         response.headers["X-Has-More"] = "true" if has_more else "false"
         response.headers["X-Next-Offset"] = str(offset + limit) if has_more else str(offset)
-        response.headers["Access-Control-Expose-Headers"] = "X-Total-Count, X-Has-More, X-Next-Offset"
+        response.headers["Access-Control-Expose-Headers"] = "X-Total-Count, X-Total-Approx, X-Has-More, X-Next-Offset"
         db.record_search_history(
             user_id,
             req.query,

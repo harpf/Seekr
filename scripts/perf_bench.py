@@ -127,7 +127,9 @@ def run(store: SqliteStore, uid: int, repeats: int, explain: bool) -> None:
         "status.blocks": _best_ms(lambda: c.execute(status_blocks, acl_params).fetchone(), repeats),
         "status.size": _best_ms(lambda: c.execute(status_size, acl_params).fetchone(), repeats),
         "count.browse": _best_ms(lambda: count_documents(store, "", user_id=uid), repeats),
-        "count.fts": _best_ms(lambda: count_documents(store, "invoice", user_id=uid), repeats),
+        # cap=1000 mirrors the production search path (app.SEARCH_TOTAL_CAP).
+        "count.fts": _best_ms(lambda: count_documents(store, "invoice", user_id=uid, cap=1000), repeats),
+        "count.fts.exact": _best_ms(lambda: count_documents(store, "invoice", user_id=uid), repeats),
         "search.broad": _best_ms(
             lambda: search(store, "invoice", limit=25, user_id=uid, mode="keyword"), repeats
         ),

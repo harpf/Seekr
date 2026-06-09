@@ -591,9 +591,10 @@ async function _fetchSearchPage(offset) {
   }
   const docs = await res.json();
   const total = Number(res.headers.get('X-Total-Count') ?? docs.length);
+  const totalApprox = (res.headers.get('X-Total-Approx') ?? '').toLowerCase() === 'true';
   const hasMore = (res.headers.get('X-Has-More') ?? '').toLowerCase() === 'true';
   const nextOffset = Number(res.headers.get('X-Next-Offset') ?? (offset + docs.length));
-  return { docs, total, hasMore, nextOffset };
+  return { docs, total, totalApprox, hasMore, nextOffset };
 }
 
 function _updateLoadMore() {
@@ -618,7 +619,7 @@ async function runSearch() {
   try {
     _searchState.loading = true;
     _updateLoadMore();
-    const { docs, total, hasMore, nextOffset } = await _fetchSearchPage(0);
+    const { docs, total, totalApprox, hasMore, nextOffset } = await _fetchSearchPage(0);
     // History is recorded server-side by /api/search; refresh the list.
     renderRecentSearches();
     // Remember the current filter set as the user's default filters
@@ -638,7 +639,7 @@ async function runSearch() {
     if (metaEl) {
       metaEl.textContent = !total
         ? ''
-        : `${total} result${total !== 1 ? 's' : ''}`;
+        : `${total}${totalApprox ? '+' : ''} result${(total !== 1 || totalApprox) ? 's' : ''}`;
     }
 
     if (!docs.length) {

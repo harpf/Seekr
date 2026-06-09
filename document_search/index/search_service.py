@@ -387,8 +387,14 @@ def count_documents(
     tags: list[str] | None = None,
     user_id: int | None = None,
     bypass_acl: bool = False,
+    cap: int | None = None,
 ) -> int:
-    """Return the number of distinct documents matching the same filters as search()."""
+    """Return the number of distinct documents matching the same filters as search().
+
+    When ``cap`` is set, counting stops at ``cap + 1`` distinct documents (via an
+    inner ``LIMIT``), so the total for a broad query stays cheap — the caller
+    renders ``cap+`` when the result exceeds ``cap``. ``cap=None`` is exact.
+    """
     if user_id is None and not bypass_acl:
         raise ValueError("user_id is required unless bypass_acl=True is set explicitly")
 
@@ -441,18 +447,18 @@ def count_documents(
             acl_sql, acl_params = visible_document_ids_subquery(user_id)
             where.append(f"d.id IN ({acl_sql})")
             params.extend(acl_params)
-        sql = f"""
-            SELECT COUNT(*)
-            FROM documents d
-            WHERE {" AND ".join(where)}
-        """
+        inner = f"SELECT d.id FROM documents d WHERE {' AND '.join(where)}"
+        if cap is not None:
+            inner += " LIMIT ?"
+            params.append(cap + 1)
+        sql = f"SELECT COUNT(*) FROM ({inner})"
         return int(store.conn.execute(sql, tuple(params)).fetchone()[0])
 
     # No `JOIN content_blocks` here: content_fts already holds one row per block
     # and nothing below references a content_blocks column, so the join was pure
     # overhead (an index probe per match).
     sql = """
-        SELECT COUNT(DISTINCT c.document_id)
+        SELECT DISTINCT c.document_id
         FROM content_fts c
         JOIN documents d ON d.id = c.document_id
         WHERE content_fts MATCH ?
@@ -483,7 +489,10 @@ def count_documents(
         acl_sql, acl_params = visible_document_ids_subquery(user_id)
         sql += f" AND d.id IN ({acl_sql})"
         params.extend(acl_params)
+    if cap is not None:
+        sql += " LIMIT ?"
+        params.append(cap + 1)
     try:
-        return int(store.conn.execute(sql, tuple(params)).fetchone()[0])
+        return int(store.conn.execute(f"SELECT COUNT(*) FROM ({sql})", tuple(params)).fetchone()[0])
     except sqlite3.OperationalError as exc:
         raise FtsQueryError(str(exc)) from exc
