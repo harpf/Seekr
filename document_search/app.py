@@ -41,7 +41,7 @@ from starlette.responses import Response
 
 from document_search import observability as _obs
 from document_search.auth import verify_password
-from document_search.config import AppConfig, load_config
+from document_search.config import AppConfig, load_config, ocr_env_overrides
 from document_search.crawler import iter_documents
 from document_search.extractors import extractor_for, load_plugins, supported_extensions
 from document_search.index.search_service import (
@@ -335,6 +335,16 @@ _OPENAPI_TAGS = [
 def create_app(db_path: str = "./document_index.db") -> FastAPI:
     configure_logging()
     config_path = Path(os.getenv("DOCUMENT_SEARCH_CONFIG_PATH", "./config.json"))
+    # Make the `ocr` config block actually take effect: the extractors read OCR
+    # settings from the environment, so export them here. setdefault means an
+    # explicit container env var still wins over the config file.
+    try:
+        _ocr_cfg = load_config(config_path) if config_path.exists() else AppConfig()
+        for _key, _val in ocr_env_overrides(_ocr_cfg).items():
+            if _val and _val != "false":
+                os.environ.setdefault(_key, _val)
+    except Exception:
+        log.warning("Failed to apply OCR config to environment", exc_info=True)
     ssl_dir = Path(os.getenv("DOCUMENT_SEARCH_SSL_DIR", "/data/ssl"))
     app = FastAPI(
         title="Seekr",

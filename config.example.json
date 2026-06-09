@@ -9,5 +9,5 @@
   "ignore_hidden": true,
   "ignore_temp_office_files": true,
   "follow_symlinks": false,
-  "ocr": {"enabled": false, "languages": ["deu", "eng"]}
+  "ocr": {"enabled": false, "languages": ["deu", "eng"], "force_ocr": false}
 }

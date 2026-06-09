@@ -23,6 +23,14 @@ services:
       # Home Assistant integration — set a strong random value to enable /api/ha/* endpoints
       # Generate one with: python3 -c "import secrets; print(secrets.token_hex(32))"
       DOCUMENT_SEARCH_API_KEY: ""
+      # ── OCR (for scanned / image-based PDFs and embedded logos) ─────────
+      # Tesseract + poppler are already in the image. OCR is OFF by default
+      # because it is CPU-intensive. Enable via these env vars (they override
+      # the config.json "ocr" block). FORCE_OCR rasterises EVERY page (slowest,
+      # max recall); leave it off to OCR only text-less pages + embedded images.
+      # DOCUMENT_SEARCH_OCR_ENABLED: "true"
+      # DOCUMENT_SEARCH_OCR_LANG: "deu+eng"
+      # DOCUMENT_SEARCH_FORCE_OCR: "false"
     expose:
       - "8080"
     healthcheck:

@@ -14,6 +14,9 @@ except ModuleNotFoundError:
 class OcrConfig:
     enabled: bool = False
     languages: list[str] = field(default_factory=lambda: ["deu", "eng"])
+    # When true, OCR every PDF page (rasterised) in addition to native text —
+    # maximum recall for image-heavy or partially-scanned documents. Slow.
+    force_ocr: bool = False
 
 
 @dataclass(slots=True)
@@ -55,3 +58,19 @@ def load_config(path: Path | None) -> AppConfig:
     if isinstance(cfg.database_path, str):
         cfg.database_path = Path(cfg.database_path)
     return cfg
+
+
+def ocr_env_overrides(cfg: AppConfig) -> dict[str, str]:
+    """Map the OCR config block to the environment variables the extractors read.
+
+    The extractors are env-driven (they call ``os.getenv`` directly), so the app
+    exports these at startup to make the ``ocr`` config block actually take
+    effect. Callers should apply them with ``os.environ.setdefault`` so an
+    explicit container env var still wins over the config file.
+    """
+    o = cfg.ocr
+    return {
+        "DOCUMENT_SEARCH_OCR_ENABLED": "true" if o.enabled else "false",
+        "DOCUMENT_SEARCH_OCR_LANG": "+".join(o.languages) if o.languages else "",
+        "DOCUMENT_SEARCH_FORCE_OCR": "true" if o.force_ocr else "false",
+    }
