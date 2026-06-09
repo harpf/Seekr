@@ -169,6 +169,12 @@ class SourcePath(BaseModel):
     mount_point: str | None = None
 
 
+class OcrSettings(BaseModel):
+    enabled: bool = False
+    languages: list[str] = Field(default_factory=lambda: ["deu", "eng"])
+    force_ocr: bool = False
+
+
 class UiConfigRequest(BaseModel):
     database_path: str
     supported_extensions: list[str]
@@ -178,6 +184,7 @@ class UiConfigRequest(BaseModel):
     source_paths: list[SourcePath] = Field(default_factory=list)
     ollama_url: str | None = None
     ollama_model: str | None = None
+    ocr: OcrSettings = Field(default_factory=OcrSettings)
 
 
 class UserCreateRequest(BaseModel):
@@ -1065,6 +1072,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             "source_paths": [],
             "ollama_url": organizer.base_url,
             "ollama_model": organizer.model,
+            "ocr": {"enabled": False, "languages": ["deu", "eng"], "force_ocr": False},
         }
         if config_path.exists():
             saved = json.loads(config_path.read_text(encoding="utf-8"))
@@ -1084,6 +1092,11 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             organizer.base_url = req.ollama_url.rstrip("/")
         if req.ollama_model:
             organizer.model = req.ollama_model
+        # Apply OCR settings live to the env the extractors read (override — the
+        # admin explicitly set them, so this beats both config-file and prior env).
+        os.environ["DOCUMENT_SEARCH_OCR_ENABLED"] = "true" if req.ocr.enabled else "false"
+        os.environ["DOCUMENT_SEARCH_OCR_LANG"] = "+".join(req.ocr.languages) if req.ocr.languages else "deu+eng"
+        os.environ["DOCUMENT_SEARCH_FORCE_OCR"] = "true" if req.ocr.force_ocr else "false"
         _audit(
             admin_id,
             "config.save",

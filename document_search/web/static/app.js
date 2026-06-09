@@ -1233,6 +1233,10 @@ async function loadConfig() {
     if (document.getElementById('cfgExcludeDirs')) cfgExcludeDirs.value = (c.exclude_dirs || []).join(', ');
     if (document.getElementById('cfgExcludePatterns')) cfgExcludePatterns.value = (c.exclude_patterns || []).join(', ');
     if (document.getElementById('cfgMaxSize')) cfgMaxSize.value = c.max_file_size_mb ?? 100;
+    const ocr = c.ocr || {};
+    if (document.getElementById('cfgOcrEnabled')) cfgOcrEnabled.checked = !!ocr.enabled;
+    if (document.getElementById('cfgOcrLang')) cfgOcrLang.value = (ocr.languages || ['deu', 'eng']).join('+');
+    if (document.getElementById('cfgOcrForce')) cfgOcrForce.checked = !!ocr.force_ocr;
     _sourcePaths = Array.isArray(c.source_paths) ? c.source_paths : [];
     renderPathList(_sourcePaths);
   } catch (e) {
@@ -1249,6 +1253,11 @@ async function saveConfig() {
       exclude_patterns: cfgExcludePatterns.value.split(',').map(s => s.trim()).filter(Boolean),
       max_file_size_mb: Number(cfgMaxSize.value || 100),
       source_paths: _sourcePaths,
+      ocr: {
+        enabled: !!(document.getElementById('cfgOcrEnabled') && cfgOcrEnabled.checked),
+        languages: (cfgOcrLang?.value || 'deu+eng').split('+').map(s => s.trim()).filter(Boolean),
+        force_ocr: !!(document.getElementById('cfgOcrForce') && cfgOcrForce.checked),
+      },
     };
     await api('/api/config', 'POST', payload);
     showToast('Configuration saved', 'ok');
