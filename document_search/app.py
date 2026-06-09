@@ -43,7 +43,7 @@ from document_search import observability as _obs
 from document_search.auth import verify_password
 from document_search.config import AppConfig, load_config
 from document_search.crawler import iter_documents
-from document_search.extractors import extractor_for, load_plugins
+from document_search.extractors import extractor_for, load_plugins, supported_extensions
 from document_search.index.search_service import (
     FtsQueryError,
     count_documents,
@@ -2982,7 +2982,14 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             f"SELECT COALESCE(SUM(d.file_size), 0) FROM documents d WHERE d.id IN ({acl_sql})",
             acl_params,
         ).fetchone()[0]
-        return {"documents": docs, "content_blocks": blocks, "total_file_size_bytes": total_size, "db_path": db_path}
+        return {
+            "documents": docs,
+            "content_blocks": blocks,
+            "total_file_size_bytes": total_size,
+            "db_path": db_path,
+            # Live set of file types Seekr can extract (built-ins + plugins).
+            "supported_extensions": sorted(supported_extensions()),
+        }
 
     @app.get("/api/files/preview")
     def api_files_preview(document_id: int, x_auth_token: str | None = Header(default=None)):
