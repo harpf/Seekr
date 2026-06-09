@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Seekr — Feature Catalogue</title>
+<meta name="description" content="A complete catalogue of features in Seekr, the self-hosted document indexing and search system." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,800;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:        #14130f;
+    --bg-2:      #1a1914;
+    --bg-3:      #201e18;
+    --ink:       #ece6d8;
+    --ink-dim:   #a8a08d;
+    --ink-faint: #6d685a;
+    --line:      rgba(236, 230, 216, 0.10);
+    --line-soft: rgba(236, 230, 216, 0.06);
+    --amber:     #e9b25a;
+    --amber-deep:#c8903a;
+    --teal:      #74b5a9;
+    --rust:      #d07f4d;
+    --maxw:      1180px;
+    --serif:     'Newsreader', Georgia, serif;
+    --display:   'Fraunces', Georgia, serif;
+    --mono:      'JetBrains Mono', ui-monospace, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 18px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  /* Atmosphere: amber glow, faint catalogue grid, grain overlay */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    background:
+      radial-gradient(1100px 620px at 78% -8%, rgba(233, 178, 90, 0.13), transparent 60%),
+      radial-gradient(900px 700px at -5% 12%, rgba(116, 181, 169, 0.06), transparent 55%),
+      linear-gradient(var(--line-soft) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 64px 64px, 64px 64px;
+  }
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 32px; }
+
+  /* ---------- Masthead ---------- */
+  header.masthead {
+    padding: 68px 0 30px;
+    border-bottom: 1px solid var(--line);
+    position: relative;
+  }
+  .kicker {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.42em;
+    text-transform: uppercase;
+    color: var(--amber);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 26px;
+  }
+  .kicker::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+  .wordmark {
+    display: flex;
+    align-items: baseline;
+    gap: 22px;
+    flex-wrap: wrap;
+  }
+  .wordmark h1 {
+    font-family: var(--display);
+    font-optical-sizing: auto;
+    font-weight: 900;
+    font-size: clamp(64px, 12vw, 168px);
+    line-height: 0.84;
+    letter-spacing: -0.03em;
+    margin: 0;
+    color: var(--ink);
+  }
+  .wordmark h1 .lens {
+    color: var(--amber);
+    font-style: italic;
+    font-weight: 500;
+  }
+  .lede {
+    font-family: var(--display);
+    font-weight: 300;
+    font-size: clamp(20px, 2.6vw, 30px);
+    line-height: 1.32;
+    color: var(--ink);
+    max-width: 30ch;
+    margin: 30px 0 0;
+  }
+  .lede em { color: var(--amber); font-style: italic; }
+  .blurb {
+    color: var(--ink-dim);
+    max-width: 62ch;
+    margin: 20px 0 0;
+    font-size: 17px;
+  }
+
+  .stamp {
+    margin-top: 34px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+  .chip {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    padding: 7px 12px;
+    background: rgba(236, 230, 216, 0.02);
+  }
+  .chip b { color: var(--amber); font-weight: 700; }
+
+  /* ---------- Filter bar ---------- */
+  .controls {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: rgba(20, 19, 15, 0.82);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+    margin-top: 4px;
+  }
+  .controls .wrap {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding-top: 16px;
+    padding-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .search {
+    position: relative;
+    flex: 1;
+    min-width: 240px;
+  }
+  .search svg {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 17px;
+    height: 17px;
+    stroke: var(--amber);
+    fill: none;
+    stroke-width: 1.8;
+  }
+  #q {
+    width: 100%;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 14px;
+    padding: 13px 14px 13px 42px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  #q::placeholder { color: var(--ink-faint); }
+  #q:focus {
+    border-color: var(--amber-deep);
+    box-shadow: 0 0 0 3px rgba(233, 178, 90, 0.12);
+  }
+  .count {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-dim);
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+  .count b { color: var(--amber); }
+
+  /* ---------- Sections ---------- */
+  main { padding: 30px 0 0; }
+  .section { padding: 44px 0; border-bottom: 1px solid var(--line-soft); }
+  .section.hidden { display: none; }
+  .sec-head {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 22px;
+    align-items: baseline;
+    margin-bottom: 30px;
+  }
+  .sec-num {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--amber);
+    letter-spacing: 0.1em;
+    padding-top: 8px;
+  }
+  .sec-title {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(26px, 4vw, 40px);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    margin: 0;
+  }
+  .sec-desc {
+    color: var(--ink-dim);
+    font-size: 16px;
+    margin: 8px 0 0;
+    max-width: 60ch;
+  }
+
+  .feats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1px;
+    background: var(--line-soft);
+    border: 1px solid var(--line-soft);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .feat {
+    background: var(--bg-2);
+    padding: 22px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    transition: background 0.2s, transform 0.2s;
+    position: relative;
+  }
+  .feat:hover { background: var(--bg-3); }
+  .feat.hidden { display: none; }
+  .feat-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 14px;
+  }
+  .feat h3 {
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 20px;
+    letter-spacing: -0.01em;
+    margin: 0;
+    color: var(--ink);
+  }
+  .feat p {
+    margin: 0;
+    color: var(--ink-dim);
+    font-size: 15.5px;
+    line-height: 1.55;
+  }
+  .tag {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    color: var(--teal);
+    border: 1px solid rgba(116, 181, 169, 0.28);
+    background: rgba(116, 181, 169, 0.06);
+    padding: 3px 7px;
+    border-radius: 2px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .tag.adm { color: var(--rust); border-color: rgba(208, 127, 77, 0.30); background: rgba(208, 127, 77, 0.06); }
+  .feat code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--amber);
+    background: rgba(233, 178, 90, 0.07);
+    padding: 1px 5px;
+    border-radius: 2px;
+  }
+
+  .noresult {
+    display: none;
+    text-align: center;
+    padding: 80px 0;
+    color: var(--ink-faint);
+    font-family: var(--display);
+    font-style: italic;
+    font-size: 24px;
+  }
+  .noresult.show { display: block; }
+
+  /* ---------- Footer ---------- */
+  footer {
+    padding: 60px 0 80px;
+    color: var(--ink-faint);
+  }
+  .foot-grid {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 24px;
+  }
+  footer .mk {
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: 40px;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+  }
+  footer .mk span { color: var(--amber); font-style: italic; font-weight: 500; }
+  footer p { font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; margin: 6px 0 0; }
+  footer a { color: var(--amber); text-decoration: none; border-bottom: 1px solid rgba(233,178,90,0.3); }
+
+  /* ---------- Reveal animation ---------- */
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .reveal { opacity: 0; animation: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+
+  @media (max-width: 760px) {
+    .wrap { padding: 0 20px; }
+    .feats { grid-template-columns: 1fr; }
+    .sec-head { grid-template-columns: 1fr; gap: 6px; }
+    body { font-size: 17px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal { animation: none; opacity: 1; }
+    html { scroll-behavior: auto; }
+  }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <div class="kicker reveal" style="animation-delay:.05s">Feature Catalogue · Self-hosted Document Intelligence</div>
+    <div class="wordmark reveal" style="animation-delay:.12s">
+      <h1>Seek<span class="lens">r</span></h1>
+    </div>
+    <p class="lede reveal" style="animation-delay:.2s">Crawl, extract, index and <em>find</em> every document you own — entirely on your own infrastructure.</p>
+    <p class="blurb reveal" style="animation-delay:.28s">A FastAPI + SQLite&nbsp;FTS5 search platform with optional local LLM assistance via Ollama. No cloud, no telemetry, no data leaving the building. This sheet catalogues every capability present on <code style="font-family:var(--mono);color:var(--amber)">main</code> today.</p>
+    <div class="stamp reveal" style="animation-delay:.36s">
+      <span class="chip">Revision <b>main</b></span>
+      <span class="chip">Compiled <b>2026-06-09</b></span>
+      <span class="chip"><b>100%</b> Local-first</span>
+      <span class="chip">Python <b>3.11+</b> · FastAPI</span>
+      <span class="chip">License <b>Self-hosted</b></span>
+    </div>
+  </div>
+</header>
+
+<div class="controls">
+  <div class="wrap">
+    <div class="search">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+      <input id="q" type="search" placeholder="filter the catalogue —  e.g. ocr, acl, webhook, semantic, backup…" autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="count"><b id="shown">0</b> / <span id="total">0</span> features</div>
+  </div>
+</div>
+
+<main class="wrap">
+
+  <!-- 01 -->
+  <section class="section" data-sec>
+    <div class="sec-head">
+      <div class="sec-num">01</div>
+      <div>
+        <h2 class="sec-title">Ingestion &amp; Extraction</h2>
+        <p class="sec-desc">The pipeline that turns files on disk into searchable, structured content blocks.</p>
+      </div>
+    </div>
+    <div class="feats">
+      <article class="feat"><div class="feat-top"><h3>Filesystem crawler</h3><span class="tag">crawler</span></div><p>Recursively walks source paths with symlink, hidden-file, temp-file and glob exclusion rules, honouring per-file size limits.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Multi-format extractors</h3><span class="tag">extractors</span></div><p><code>.pdf</code> (pypdf + Tesseract OCR), <code>.docx</code>, <code>.pptx</code>, legacy <code>.doc</code>/<code>.ppt</code> (antiword/catppt), <code>.txt</code> and <code>.md</code> — each producing typed content blocks.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Plugin extractor API</h3><span class="tag">extensible</span></div><p>Add new file types without forking: register via Python entry points or a drop-in <code>plugins/</code> directory. Versioned contract, conflict guards, full per-plugin error isolation.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Registry-aware crawling</h3><span class="tag">registry</span></div><p>The crawler gates on the live extractor registry, so any built-in or plugin file type flows end-to-end once enabled in config.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Optional OCR pipeline</h3><span class="tag">ocr</span></div><p>Tesseract-backed OCR for scanned PDFs and image content, with configurable language packs (eng/deu shipped).</p></article>
+      <article class="feat"><div class="feat-top"><h3>Incremental indexing</h3><span class="tag">sha-256</span></div><p>Files are fingerprinted by SHA-256 + mtime; unchanged documents are skipped, so re-runs only re-extract what actually changed.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Authenticated upload</h3><span class="tag">/api/upload</span></div><p>Drag-and-drop upload with extension allow-list, libmagic magic-byte sniffing, path-traversal containment and an 8&nbsp;KB metadata cap.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Duplicate detection</h3><span class="tag">/api/documents/duplicates</span></div><p>Surface exact (hash) and near-duplicate documents and remove redundant copies from a review view.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Scheduled re-indexing</h3><span class="tag">scheduler</span></div><p>Optional cron-style periodic crawl driven by the persistent job queue — no manual trigger required.</p></article>
+    </div>
+  </section>
+
+  <!-- 02 -->
+  <section class="section" data-sec>
+    <div class="sec-head">
+      <div class="sec-num">02</div>
+      <div>
+        <h2 class="sec-title">Search</h2>
+        <p class="sec-desc">Full-text keyword search blended with optional local vector retrieval.</p>
+      </div>
+    </div>
+    <div class="feats">
+      <article class="feat"><div class="feat-top"><h3>SQLite FTS5 full-text</h3><span class="tag">/api/search</span></div><p>BM25-ranked search supporting AND / OR, exact phrases, prefix (<code>maint*</code>), and negation (<code>-draft</code>).</p></article>
+      <article class="feat"><div class="feat-top"><h3>Hybrid semantic search</h3><span class="tag">embeddings</span></div><p>Local embeddings (Ollama / sentence-transformers) stored in a vector table and fused with BM25 via reciprocal-rank fusion for hybrid ranking.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Embedding backfill job</h3><span class="tag">/api/index/embeddings/start</span></div><p>Vectors are populated by a dedicated backfill job, keeping keyword-only search a first-class low-resource mode.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Faceted filters</h3><span class="tag">filters</span></div><p>Narrow by file type, path prefix, block type (page/paragraph/table/slide), modification-date range and tag.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Snippet highlighting</h3><span class="tag">highlight</span></div><p>Matched terms are highlighted in context-aware snippets with source and metadata shown per result.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Result pagination</h3><span class="tag">limit/offset</span></div><p>Offset paging with a “load more” flow instead of a hard result cap.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Graceful FTS errors</h3><span class="tag">resilient</span></div><p>Unmatched quotes and malformed queries return a friendly “check your syntax” message rather than a 500.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Search history &amp; saved searches</h3><span class="tag">/api/search/saved</span></div><p>Per-user server-side history and named saved searches that restore the full query plus its filters.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Browsable tag cloud</h3><span class="tag">tags</span></div><p>A clickable tag cloud above results filters the index instantly by any label you have applied.</p></article>
+    </div>
+  </section>
+
+  <!-- 03 -->
+  <section class="section" data-sec>
+    <div class="sec-head">
+      <div class="sec-num">03</div>
+      <div>
+        <h2 class="sec-title">Local AI &amp; LLM</h2>
+        <p class="sec-desc">Optional Ollama-powered assistance — strictly local, validated, and auditable.</p>
+      </div>
+    </div>
+    <div class="feats">
+      <article class="feat"><div class="feat-top"><h3>AI filing suggestions</h3><span class="tag">all users</span></div><p>After upload, the model proposes a destination folder, tags and reasoning; apply to move &amp; re-index, or dismiss.</p></article>
+      <article class="feat"><div class="feat-top"><h3>RAG summarisation</h3><span class="tag">/api/ai/summarize</span></div><p>Summarise the top results with citations back to source blocks — synchronous and ACL-inheriting.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Folder-structure suggestions</h3><span class="tag adm">admin</span></div><p>Analyses the whole index and proposes an optimal folder taxonomy for your collection.</p></article>
+      <article class="feat"><div class="feat-top"><h3>AI reorganizer</h3><span class="tag adm">admin</span></div><p>Batch-analyses documents and proposes bulk moves, run as a tracked background job.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Bulk auto-tagging</h3><span class="tag">/api/ai/bulk-tag/start</span></div><p>Extends single-file tag suggestion to a job that tags across the entire index.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Validation &amp; provenance</h3><span class="tag">ai_decisions</span></div><p>Every LLM output is schema-validated before persistence and recorded in an <code>ai_decisions</code> audit row capturing model + prompt.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Model management</h3><span class="tag adm">admin</span></div><p>Pull, delete and test models; connection check confirms the model actually responds.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Resource-aware tiers</h3><span class="tag">system-info</span></div><p>Reports available RAM / GPU VRAM and recommends a model tier, flagging each library model as ok / warn / too-large.</p></article>
+    </div>
+  </section>
+
+  <!-- 04 -->
+  <section class="section" data-sec>
+    <div class="sec-head">
+      <div class="sec-num">04</div>
+      <div>
+        <h2 class="sec-title">Security &amp; Access Control</h2>
+        <p class="sec-desc">Authentication, fine-grained document permissions and a tamper-evident audit trail.</p>
+      </div>
+    </div>
+    <div class="feats">
+      <article class="feat"><div class="feat-top"><h3>PBKDF2 authentication</h3><span class="tag">/api/login</span></div><p>PBKDF2-HMAC-SHA256 password hashing with username/password rules and an admin/user role model.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Externalised sessions</h3><span class="tag">SessionStore</span></div><p>Sessions live in the database (8-hour idle expiry), surviving restarts; no in-memory auth state.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Login rate limiting</h3><span class="tag">RateLimiter</span></div><p>10 failed attempts per 5-minute window per IP, backed by a persistent store.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Document ACL enforcement</h3><span class="tag">acl</span></div><p>Principals, groups and per-document grants gate every document-returning endpoint, not just search.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Grant / revoke API</h3><span class="tag">/api/acl/grant</span></div><p>Read and write permissions granted or revoked per document or group, with owner assignment on ingest.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Group management</h3><span class="tag adm">admin</span></div><p>Create groups and assign members; visibility falls back to the <code>public</code> group by default.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Admin audit log</h3><span class="tag">/api/audit</span></div><p>Every state-changing route records an audit entry — who did what, when — never logging secrets.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Configurable CORS</h3><span class="tag">closed by default</span></div><p>Explicit origin allow-list via <code>CORSMiddleware</code>; locked down unless explicitly opened.</p></article>
+    </div>
+  </section>
+
+  <!-- 05 -->
+  <section class="section" data-sec>
+    <div class="sec-head">
+      <div class="sec-num">05</div>
+      <div>
+        <h2 class="sec-title">Jobs &amp; Operations</h2>
+        <p class="sec-desc">A durable work queue plus the operational surface to back up, restore and observe the system.</p>
+      </div>
+    </div>
+    <div class="feats">
+      <article class="feat"><div class="feat-top"><h3>Persistent job queue</h3><span class="tag">JobStore + Worker</span></div><p>Indexing and AI jobs survive restarts via an atomic <code>UPDATE … RETURNING</code> claim that anticipates multiple workers.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Global jobs dashboard</h3><span class="tag">/api/jobs</span></div><p>Owner/admin-scoped view of all jobs with state, progress and retry count in one place.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Cancel &amp; re-enqueue</h3><span class="tag">cooperative</span></div><p>Cancel running jobs at checkpoints and re-enqueue interrupted ones with a click.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Backup &amp; restore</h3><span class="tag">/api/backup</span></div><p>WAL-safe SQLite backups, scheduled snapshots, one-click restore and full data export / import.</p></article>
+      <article class="feat"><div class="feat-top"><h3>In-app update flow</h3><span class="tag adm">admin</span></div><p>Backup → <code>git pull</code> → rebuild via <code>update.sh</code>, with a final status row and auto-rollback on failed health check.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Health &amp; readiness</h3><span class="tag">/health · /ready</span></div><p>Liveness with no DB hit and a readiness probe (503 until the DB and worker are reachable) for orchestration.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Prometheus metrics</h3><span class="tag">/metrics</span></div><p>Request latency, index throughput, queue depth and job success/fail counts on a private registry, token-guarded.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Structured logging</h3><span class="tag">observability</span></div><p>Central logging config replaces silent exception swallowing with leveled, diagnosable log output.</p></article>
+    </div>
+  </section>
+
+  <!-- 06 -->
+  <section class="section" data-sec>
+    <div class="sec-head">
+      <div class="sec-num">06</div>
+      <div>
+        <h2 class="sec-title">Integrations &amp; API</h2>
+        <p class="sec-desc">A versioned REST surface, outbound events and a Home-Assistant-style integration channel.</p>
+      </div>
+    </div>
+    <div class="feats">
+      <article class="feat"><div class="feat-top"><h3>Versioned REST API</h3><span class="tag">/api/v1/*</span></div><p>Scope-rewrite middleware exposes a stable <code>v1</code> contract with back-compat, plus a polished OpenAPI / wiki page.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Home-Assistant API</h3><span class="tag">/api/ha/*</span></div><p>Dedicated status, test, search and index endpoints for HA-style integrations, authenticated by API keys.</p></article>
+      <article class="feat"><div class="feat-top"><h3>API key management</h3><span class="tag">/api/ha/keys</span></div><p>Create, list and revoke scoped API keys for headless and machine-to-machine access.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Signed webhooks</h3><span class="tag">/api/webhooks</span></div><p>Outbound HMAC-signed webhooks with an SSRF guard and queue-backed retry; fires an <code>index.completed</code> event.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Delivery inspection</h3><span class="tag">deliveries</span></div><p>Per-webhook delivery history for debugging downstream receivers.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Dependency reporting</h3><span class="tag">/api/system/dependencies</span></div><p>Reports presence of system tools (antiword, tesseract, …) so missing extractors are diagnosable.</p></article>
+    </div>
+  </section>
+
+  <!-- 07 -->
+  <section class="section" data-sec>
+    <div class="sec-head">
+      <div class="sec-num">07</div>
+      <div>
+        <h2 class="sec-title">Deployment &amp; Infrastructure</h2>
+        <p class="sec-desc">A hardened, container-first deployment that scales from a single node toward multi-instance.</p>
+      </div>
+    </div>
+    <div class="feats">
+      <article class="feat"><div class="feat-top"><h3>Docker Compose stack</h3><span class="tag">3 containers</span></div><p>App + Ollama + nginx TLS proxy, wired together with internal-only ports and a single public HTTPS entrypoint.</p></article>
+      <article class="feat"><div class="feat-top"><h3>TLS termination</h3><span class="tag">nginx</span></div><p>Auto-generated self-signed certs from <code>TLS_DOMAIN</code>/<code>TLS_IP</code>, or bring your own PEM chain + key.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Self-service certificates</h3><span class="tag">/api/ssl</span></div><p>Generate or upload an application-layer RSA-2048 cert (custom CN/SANs/validity) from the admin UI.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Network share mounts</h3><span class="tag adm">admin</span></div><p>Mount SMB and NFS shares through the UI with credential-file handling and remote-path validation.</p></article>
+      <article class="feat"><div class="feat-top"><h3>GPU acceleration</h3><span class="tag">nvidia</span></div><p>Opt-in NVIDIA GPU inference for Ollama via a compose <code>deploy</code> block.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Multi-instance readiness</h3><span class="tag">redis optional</span></div><p>Session and rate-limit state run on SQLite by default or Redis via <code>DOCUMENT_SEARCH_STATE_BACKEND</code>, enabling replicas.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Hardened container</h3><span class="tag">non-root</span></div><p>Runs as a dedicated non-root user with pinned security-sensitive dependencies and subprocess timeouts.</p></article>
+      <article class="feat"><div class="feat-top"><h3>CI quality gate</h3><span class="tag">github actions</span></div><p>Every push/PR runs <code>ruff check</code> (gating) and <code>pytest</code>, with informational <code>mypy</code>.</p></article>
+    </div>
+  </section>
+
+  <!-- 08 -->
+  <section class="section" data-sec>
+    <div class="sec-head">
+      <div class="sec-num">08</div>
+      <div>
+        <h2 class="sec-title">Web Interface &amp; UX</h2>
+        <p class="sec-desc">A clean vanilla-JS frontend with in-browser preview, theming and per-user preferences.</p>
+      </div>
+    </div>
+    <div class="feats">
+      <article class="feat"><div class="feat-top"><h3>Vanilla-JS web UI</h3><span class="tag">no build step</span></div><p>Jinja2 templates and a token-based CSS design system across Search, Ingest, Config, Jobs and Wiki views.</p></article>
+      <article class="feat"><div class="feat-top"><h3>In-browser preview</h3><span class="tag">/api/files/preview</span></div><p>ACL-gated preview of PDF (PDF.js), images, text and Markdown without downloading the original.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Dark mode &amp; theming</h3><span class="tag">prefers-color-scheme</span></div><p>A <code>[data-theme]</code> token set with a toggle that respects the OS preference.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Per-user preferences</h3><span class="tag">/api/preferences</span></div><p>Server-side theme, results-per-page and default filters persisted to each account.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Tags &amp; marks</h3><span class="tag">/api/documents</span></div><p>Per-user labels and marks attached to any document, in an independent personal tag space.</p></article>
+      <article class="feat"><div class="feat-top"><h3>Accessibility pass</h3><span class="tag">WCAG 2.1 AA</span></div><p>ARIA live regions, labelled controls, visible focus rings and Escape-to-close on async UI.</p></article>
+    </div>
+  </section>
+
+  <div class="noresult" id="noresult">Nothing in the catalogue matches that.</div>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="mk">Seek<span>r</span></div>
+        <p>Self-hosted document indexing &amp; search · local-first by design</p>
+        <p>Source — <a href="https://github.com/harpf/Seekr">github.com/harpf/Seekr</a></p>
+      </div>
+      <div style="text-align:right">
+        <p>Catalogue compiled 2026-06-09</p>
+        <p>Reflects <code style="font-family:var(--mono);color:var(--amber)">main</code> · crawler → extractors → services → index → web</p>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var feats = Array.prototype.slice.call(document.querySelectorAll('.feat'));
+    var sections = Array.prototype.slice.call(document.querySelectorAll('[data-sec]'));
+    var q = document.getElementById('q');
+    var shown = document.getElementById('shown');
+    var totalEl = document.getElementById('total');
+    var noresult = document.getElementById('noresult');
+
+    // Index searchable text for each feature once.
+    feats.forEach(function (f) { f.dataset.text = f.textContent.toLowerCase(); });
+    totalEl.textContent = feats.length;
+    shown.textContent = feats.length;
+
+    function apply() {
+      var term = q.value.trim().toLowerCase();
+      var visible = 0;
+      feats.forEach(function (f) {
+        var hit = !term || f.dataset.text.indexOf(term) !== -1;
+        f.classList.toggle('hidden', !hit);
+        if (hit) visible++;
+      });
+      // Hide a section when all its features are filtered out.
+      sections.forEach(function (s) {
+        var any = s.querySelectorAll('.feat:not(.hidden)').length > 0;
+        s.classList.toggle('hidden', !any);
+      });
+      shown.textContent = visible;
+      noresult.classList.toggle('show', visible === 0);
+    }
+    q.addEventListener('input', apply);
+
+    // Staggered reveal of sections on scroll into view.
+    if ('IntersectionObserver' in window && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) {
+            e.target.classList.add('reveal');
+            io.unobserve(e.target);
+          }
+        });
+      }, { threshold: 0.08 });
+      sections.forEach(function (s) { io.observe(s); });
+    }
+  })();
+</script>
+
+</body>
+</html>
