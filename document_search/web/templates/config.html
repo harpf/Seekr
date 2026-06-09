@@ -163,6 +163,11 @@
                   <label class="f-label" for="cfgOcrForce"><input id="cfgOcrForce" type="checkbox" /> Force OCR every page</label>
                   <span class="f-hint">Rasterise &amp; OCR every page — maximum recall, slowest</span>
                 </div>
+                <div class="f-col">
+                  <label class="f-label" for="cfgOcrDpi">OCR DPI</label>
+                  <input id="cfgOcrDpi" type="number" min="50" max="600" placeholder="200" />
+                  <span class="f-hint">Higher = more accurate but slower (200 default, 300 for dense invoices)</span>
+                </div>
               </div>
             </div>
           </div>

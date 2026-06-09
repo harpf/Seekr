@@ -1266,6 +1266,7 @@ async function loadConfig() {
     if (document.getElementById('cfgOcrEnabled')) cfgOcrEnabled.checked = !!ocr.enabled;
     if (document.getElementById('cfgOcrLang')) cfgOcrLang.value = (ocr.languages || ['deu', 'eng']).join('+');
     if (document.getElementById('cfgOcrForce')) cfgOcrForce.checked = !!ocr.force_ocr;
+    if (document.getElementById('cfgOcrDpi')) cfgOcrDpi.value = ocr.dpi ?? 200;
     _sourcePaths = Array.isArray(c.source_paths) ? c.source_paths : [];
     renderPathList(_sourcePaths);
   } catch (e) {
@@ -1286,6 +1287,7 @@ async function saveConfig() {
         enabled: !!(document.getElementById('cfgOcrEnabled') && cfgOcrEnabled.checked),
         languages: (cfgOcrLang?.value || 'deu+eng').split('+').map(s => s.trim()).filter(Boolean),
         force_ocr: !!(document.getElementById('cfgOcrForce') && cfgOcrForce.checked),
+        dpi: Number(cfgOcrDpi?.value || 200),
       },
     };
     await api('/api/config', 'POST', payload);

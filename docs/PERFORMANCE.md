@@ -64,6 +64,27 @@ values across machines.
   `X-Total-Approx`; the UI renders "1000+" when exceeded.
 - **Tuned SQLite connection**: WAL, `synchronous=NORMAL`, 32 MB page cache,
   256 MB mmap, `temp_store=MEMORY`, `busy_timeout=5000` (already in place).
+- **Parallel indexing + OCR tuning** (`perf(index)`): the index job extracts
+  documents in a thread pool (`INDEX_WORKERS`, DB writes serialised), OCR pages
+  run batched/optionally parallel at a configurable DPI, and each Tesseract is
+  pinned single-threaded. See *Indexing / OCR throughput* below.
+
+## Indexing / OCR throughput
+
+The initial scan is dominated by extraction — and OCR (Tesseract) is the most
+CPU-intensive part by far. Knobs (all env vars; OCR ones also live in the `ocr`
+config block / Config → General):
+
+| env var | default | effect |
+|---|---|---|
+| `DOCUMENT_SEARCH_INDEX_WORKERS` | `min(cpu, 4)` | documents extracted in parallel per index job (DB writes stay serialised). The main lever — raise toward your core count for OCR-heavy scans. |
+| `DOCUMENT_SEARCH_OCR_DPI` | `200` | rasterisation DPI; higher = more accurate, slower. |
+| `DOCUMENT_SEARCH_OCR_PAGE_WORKERS` | `1` | pages of ONE PDF OCR'd in parallel. Keep at 1 unless indexing a few very large scanned PDFs (else it oversubscribes the cores `INDEX_WORKERS` already uses). |
+| `DOCUMENT_SEARCH_OCR_RASTER_THREADS` | `min(cpu, 4)` | poppler `thread_count` for rasterisation. |
+
+Each Tesseract process is pinned single-threaded (`OMP_THREAD_LIMIT=1`) so the
+pools above control core usage. Force-OCR rasterises the spanned pages **once**
+(batched) instead of re-opening the PDF per page.
 
 ## Backlog (measured, ranked by impact)
 

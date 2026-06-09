@@ -17,6 +17,9 @@ class OcrConfig:
     # When true, OCR every PDF page (rasterised) in addition to native text —
     # maximum recall for image-heavy or partially-scanned documents. Slow.
     force_ocr: bool = False
+    # Rasterisation DPI for OCR. Higher = more accurate but slower (200 default,
+    # 300 for dense/small-font invoices).
+    dpi: int = 200
 
 
 @dataclass(slots=True)
@@ -73,4 +76,5 @@ def ocr_env_overrides(cfg: AppConfig) -> dict[str, str]:
         "DOCUMENT_SEARCH_OCR_ENABLED": "true" if o.enabled else "false",
         "DOCUMENT_SEARCH_OCR_LANG": "+".join(o.languages) if o.languages else "",
         "DOCUMENT_SEARCH_FORCE_OCR": "true" if o.force_ocr else "false",
+        "DOCUMENT_SEARCH_OCR_DPI": str(o.dpi) if o.dpi else "",
     }

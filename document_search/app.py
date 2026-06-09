@@ -176,6 +176,7 @@ class OcrSettings(BaseModel):
     enabled: bool = False
     languages: list[str] = Field(default_factory=lambda: ["deu", "eng"])
     force_ocr: bool = False
+    dpi: int = 200
 
 
 class UiConfigRequest(BaseModel):
@@ -347,6 +348,16 @@ _OPENAPI_TAGS = [
 # most documents) is the dominant search cost; capping keeps it cheap. See
 # docs/PERFORMANCE.md.
 SEARCH_TOTAL_CAP = 1000
+
+
+def _index_workers() -> int:
+    """Threads extracting documents in parallel within an index job
+    (DOCUMENT_SEARCH_INDEX_WORKERS). Extraction (esp. OCR) is CPU-bound; the DB
+    writes stay serialised on the worker thread. Default = min(cpu, 4)."""
+    try:
+        return max(1, int(os.getenv("DOCUMENT_SEARCH_INDEX_WORKERS", "").strip()))
+    except (TypeError, ValueError):
+        return max(1, min(4, os.cpu_count() or 1))
 
 
 def create_app(db_path: str = "./document_index.db") -> FastAPI:
@@ -521,6 +532,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     @worker.handler("index_paths")
     def _handle_index_paths(payload: dict, progress_cb):
+        from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+
         from document_search.config import load_config
 
         paths = payload["paths"]
@@ -537,40 +550,69 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         # Use a worker-thread-owned SqliteStore (do NOT call `store()` which is request-thread-local)
         db = SqliteStore(Path(db_path))
         default_owner_pid = _resolve_default_owner_principal_id(db)
-        for path in iter_documents([Path(p) for p in paths], cfg):
-            counts["found"] += 1
-            fp = fingerprint(path)
-            existing = db.get_document(str(fp.path))
-            if (
-                not force
-                and existing
-                and existing["sha256"] == fp.sha256
-                and existing["modified_at"] == fp.modified_at.isoformat()
-            ):
-                counts["skipped"] += 1
+
+        # Extraction (esp. OCR) is CPU-bound and runs in a thread pool; all DB
+        # reads/writes and counter updates stay on this worker thread, so the
+        # single SQLite writer is never touched concurrently.
+        futures: dict = {}
+
+        def _finalise(done_futures) -> None:
+            for fut in done_futures:
+                fp_d, existing_d = futures.pop(fut)
+                try:
+                    result = fut.result()
+                except Exception:
+                    counts["errors"] += 1
+                    counts["done"] += 1
+                    _obs.INDEX_DOCS_TOTAL.labels(outcome="error").inc()
+                    progress_cb(dict(counts))
+                    continue
+                db.upsert_document(fp_d, result, owner_principal_id=default_owner_pid)
+                if result.status == "error":
+                    counts["errors"] += 1
+                    _obs.INDEX_DOCS_TOTAL.labels(outcome="error").inc()
+                elif existing_d:
+                    counts["updated"] += 1
+                    _obs.INDEX_DOCS_TOTAL.labels(outcome="updated").inc()
+                else:
+                    counts["indexed"] += 1
+                    _obs.INDEX_DOCS_TOTAL.labels(outcome="indexed").inc()
                 counts["done"] += 1
-                _obs.INDEX_DOCS_TOTAL.labels(outcome="skipped").inc()
                 progress_cb(dict(counts))
-                continue
-            extr = extractor_for(path.suffix.lower())
-            if extr is None:
-                counts["done"] += 1
-                _obs.INDEX_DOCS_TOTAL.labels(outcome="no_extractor").inc()
-                progress_cb(dict(counts))
-                continue
-            result = extr.extract(path)
-            db.upsert_document(fp, result, owner_principal_id=default_owner_pid)
-            if result.status == "error":
-                counts["errors"] += 1
-                _obs.INDEX_DOCS_TOTAL.labels(outcome="error").inc()
-            elif existing:
-                counts["updated"] += 1
-                _obs.INDEX_DOCS_TOTAL.labels(outcome="updated").inc()
-            else:
-                counts["indexed"] += 1
-                _obs.INDEX_DOCS_TOTAL.labels(outcome="indexed").inc()
-            counts["done"] += 1
-            progress_cb(dict(counts))
+
+        workers = _index_workers()
+        max_inflight = workers * 2
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for path in iter_documents([Path(p) for p in paths], cfg):
+                counts["found"] += 1
+                fp = fingerprint(path)
+                existing = db.get_document(str(fp.path))
+                if (
+                    not force
+                    and existing
+                    and existing["sha256"] == fp.sha256
+                    and existing["modified_at"] == fp.modified_at.isoformat()
+                ):
+                    counts["skipped"] += 1
+                    counts["done"] += 1
+                    _obs.INDEX_DOCS_TOTAL.labels(outcome="skipped").inc()
+                    progress_cb(dict(counts))
+                    continue
+                extr = extractor_for(path.suffix.lower())
+                if extr is None:
+                    counts["done"] += 1
+                    _obs.INDEX_DOCS_TOTAL.labels(outcome="no_extractor").inc()
+                    progress_cb(dict(counts))
+                    continue
+                futures[pool.submit(extr.extract, path)] = (fp, existing)
+                # Bound in-flight work: drain a completed extraction before
+                # queueing more, so memory and progress stay bounded/streamed.
+                if len(futures) >= max_inflight:
+                    done, _ = wait(list(futures), return_when=FIRST_COMPLETED)
+                    _finalise(done)
+            while futures:
+                done, _ = wait(list(futures), return_when=FIRST_COMPLETED)
+                _finalise(done)
         webhook_service.enqueue_event(
             "index.completed",
             {
@@ -1088,7 +1130,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             "source_paths": [],
             "ollama_url": organizer.base_url,
             "ollama_model": organizer.model,
-            "ocr": {"enabled": False, "languages": ["deu", "eng"], "force_ocr": False},
+            "ocr": {"enabled": False, "languages": ["deu", "eng"], "force_ocr": False, "dpi": 200},
         }
         if config_path.exists():
             saved = json.loads(config_path.read_text(encoding="utf-8"))
@@ -1113,6 +1155,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         os.environ["DOCUMENT_SEARCH_OCR_ENABLED"] = "true" if req.ocr.enabled else "false"
         os.environ["DOCUMENT_SEARCH_OCR_LANG"] = "+".join(req.ocr.languages) if req.ocr.languages else "deu+eng"
         os.environ["DOCUMENT_SEARCH_FORCE_OCR"] = "true" if req.ocr.force_ocr else "false"
+        os.environ["DOCUMENT_SEARCH_OCR_DPI"] = str(req.ocr.dpi or 200)
         _audit(
             admin_id,
             "config.save",

@@ -31,6 +31,16 @@ services:
       # DOCUMENT_SEARCH_OCR_ENABLED: "true"
       # DOCUMENT_SEARCH_OCR_LANG: "deu+eng"
       # DOCUMENT_SEARCH_FORCE_OCR: "false"
+      # DOCUMENT_SEARCH_OCR_DPI: "200"            # higher = more accurate, slower
+      # ── Indexing / OCR throughput tuning ───────────────────────────────
+      # Parallelism for the initial scan. Extraction (esp. OCR) is CPU-bound;
+      # the index job extracts this many documents at once (DB writes stay
+      # serialised). Default = min(CPU, 4). Raise toward your core count.
+      # DOCUMENT_SEARCH_INDEX_WORKERS: "8"
+      # Pages of ONE big scanned PDF OCR'd in parallel. Keep at 1 unless you
+      # index few very large PDFs (otherwise it oversubscribes the cores that
+      # INDEX_WORKERS already uses).
+      # DOCUMENT_SEARCH_OCR_PAGE_WORKERS: "1"
     expose:
       - "8080"
     healthcheck:

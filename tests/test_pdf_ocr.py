@@ -100,8 +100,8 @@ def test_scanned_page_is_ocred_when_enabled(monkeypatch):
     monkeypatch.setenv("DOCUMENT_SEARCH_OCR_ENABLED", "true")
     monkeypatch.delenv("DOCUMENT_SEARCH_FORCE_OCR", raising=False)
     monkeypatch.setattr(
-        pdf_mod, "ocr_pdf_page",
-        lambda path, page, languages="eng+deu": "Rechnung Nr. 4711 ACME GmbH" if page == 1 else "",
+        pdf_mod, "ocr_pdf_pages",
+        lambda path, pages, languages="eng+deu": {1: "Rechnung Nr. 4711 ACME GmbH"} if 1 in pages else {},
     )
 
     result = PdfTextExtractor().extract(Path("scan.pdf"))
@@ -117,7 +117,7 @@ def test_no_ocr_when_disabled(monkeypatch):
     monkeypatch.delenv("DOCUMENT_SEARCH_OCR_ENABLED", raising=False)
     monkeypatch.delenv("DOCUMENT_SEARCH_FORCE_OCR", raising=False)
     monkeypatch.setattr(
-        pdf_mod, "ocr_pdf_page",
+        pdf_mod, "ocr_pdf_pages",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("OCR must not run when disabled")),
     )
     result = PdfTextExtractor().extract(Path("scan.pdf"))
@@ -132,9 +132,12 @@ def test_embedded_image_on_text_page_is_ocred(monkeypatch):
     monkeypatch.setenv("DOCUMENT_SEARCH_OCR_ENABLED", "true")
     monkeypatch.delenv("DOCUMENT_SEARCH_FORCE_OCR", raising=False)
     monkeypatch.setattr(pdf_mod, "ocr_image_bytes", lambda data, languages="eng+deu": "ACME GmbH Logo")
+    # No textless pages → no full-page OCR call expected.
     monkeypatch.setattr(
-        pdf_mod, "ocr_pdf_page",
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError("full-page OCR must not run on a text page")),
+        pdf_mod, "ocr_pdf_pages",
+        lambda path, pages, languages="eng+deu": (
+            {} if not pages else (_ for _ in ()).throw(AssertionError("full-page OCR must not run on a text page"))
+        ),
     )
 
     result = PdfTextExtractor().extract(Path("invoice.pdf"))
@@ -151,7 +154,10 @@ def test_force_ocr_ocrs_every_page_and_skips_embedded(monkeypatch):
     _patch_reader(monkeypatch, [_FakePage("native text", images=[b"LOGO"])])
     monkeypatch.setenv("DOCUMENT_SEARCH_OCR_ENABLED", "true")
     monkeypatch.setenv("DOCUMENT_SEARCH_FORCE_OCR", "true")
-    monkeypatch.setattr(pdf_mod, "ocr_pdf_page", lambda path, page, languages="eng+deu": "FULL PAGE OCR incl logo")
+    monkeypatch.setattr(
+        pdf_mod, "ocr_pdf_pages",
+        lambda path, pages, languages="eng+deu": {p: "FULL PAGE OCR incl logo" for p in pages},
+    )
     monkeypatch.setattr(
         pdf_mod, "ocr_image_bytes",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("embedded-image OCR must not run under force_ocr")),
