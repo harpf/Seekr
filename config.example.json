@@ -1,6 +1,6 @@
 {
   "database_path": "./document_index.db",
-  "supported_extensions": [".pdf", ".docx", ".pptx", ".txt", ".md", ".doc", ".ppt"],
+  "supported_extensions": [".pdf", ".docx", ".pptx", ".txt", ".md", ".doc", ".ppt", ".eml", ".msg"],
   "exclude_dirs": [".git", "node_modules", "__pycache__", ".venv", "temp"],
   "exclude_patterns": ["~$*", "*.tmp"],
   "max_file_size_mb": 100,

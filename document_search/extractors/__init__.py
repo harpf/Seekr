@@ -27,8 +27,10 @@ from pathlib import Path
 
 from document_search.extractors.base import TextExtractor
 from document_search.extractors.docx_extractor import DocxTextExtractor
+from document_search.extractors.eml_extractor import EmlTextExtractor
 from document_search.extractors.legacy_office_extractor import LegacyOfficeTextExtractor
 from document_search.extractors.md_extractor import MdTextExtractor
+from document_search.extractors.msg_extractor import MsgTextExtractor
 from document_search.extractors.pdf_extractor import PdfTextExtractor
 from document_search.extractors.pptx_extractor import PptxTextExtractor
 from document_search.extractors.txt_extractor import TxtTextExtractor
@@ -72,6 +74,8 @@ def _seed_builtins() -> frozenset[str]:
         ".md": MdTextExtractor(),
         ".doc": LegacyOfficeTextExtractor(),
         ".ppt": LegacyOfficeTextExtractor(),
+        ".eml": EmlTextExtractor(),
+        ".msg": MsgTextExtractor(),
     }
     _REGISTRY.update(builtins)
     return frozenset(builtins)

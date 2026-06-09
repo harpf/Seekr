@@ -17,8 +17,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_BINARY_EXTS = {".pdf", ".docx", ".pptx", ".doc", ".ppt"}
-_TEXT_EXTS = {".txt", ".md"}
+_BINARY_EXTS = {".pdf", ".docx", ".pptx", ".doc", ".ppt", ".msg"}
+_TEXT_EXTS = {".txt", ".md", ".eml"}
 
 _HEADER_SIGNATURES: dict[str, tuple[bytes, ...]] = {
     ".pdf": (b"%PDF-",),
@@ -26,6 +26,8 @@ _HEADER_SIGNATURES: dict[str, tuple[bytes, ...]] = {
     ".pptx": (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"),
     ".doc": (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",),
     ".ppt": (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",),
+    # Outlook .msg is a compound OLE2 file — same container magic as .doc/.ppt.
+    ".msg": (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",),
 }
 
 _OOXML = "application/vnd.openxmlformats-officedocument"
@@ -48,6 +50,15 @@ _ALLOWED_MIME: dict[str, set[str]] = {
         "application/vnd.ms-powerpoint",
         "application/x-ole-storage",
         "application/vnd.ms-office",
+    },
+    ".msg": {
+        "application/vnd.ms-outlook",
+        "application/x-ole-storage",
+        "application/vnd.ms-office",
+        # libmagic versions without an Outlook signature fall back to the
+        # generic compound-document type for OLE2 containers.
+        "application/CDFV2",
+        "application/CDFV2-corrupt",
     },
 }
 

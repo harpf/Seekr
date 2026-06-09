@@ -1387,7 +1387,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         )
         safe_name = Path(file.filename or "upload.bin").name
         ext = Path(safe_name).suffix.lower()
-        allowed = {".pdf", ".docx", ".pptx", ".txt", ".md", ".doc", ".ppt"}
+        allowed = {".pdf", ".docx", ".pptx", ".txt", ".md", ".doc", ".ppt", ".eml", ".msg"}
         if ext not in allowed:
             raise HTTPException(status_code=400, detail=f"Unsupported file extension: {ext}")
 

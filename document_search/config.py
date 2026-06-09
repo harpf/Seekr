@@ -19,7 +19,7 @@ class OcrConfig:
 @dataclass(slots=True)
 class AppConfig:
     database_path: Path = Path("./document_index.db")
-    supported_extensions: list[str] = field(default_factory=lambda: [".pdf", ".docx", ".pptx", ".txt", ".md", ".doc", ".ppt"])
+    supported_extensions: list[str] = field(default_factory=lambda: [".pdf", ".docx", ".pptx", ".txt", ".md", ".doc", ".ppt", ".eml", ".msg"])
     exclude_dirs: list[str] = field(default_factory=lambda: [".git", "node_modules", "__pycache__", ".venv", "temp"])
     exclude_patterns: list[str] = field(default_factory=lambda: ["~$*", "*.tmp"])
     max_file_size_mb: int = 100

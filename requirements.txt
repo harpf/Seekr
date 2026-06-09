@@ -11,6 +11,10 @@ pdf2image>=1.17.0
 pytest>=8.0.0
 python-multipart>=0.0.9,<0.1
 python-magic>=0.4.27
+# Outlook .msg (compound OLE) extraction. .eml uses the stdlib `email` module
+# and needs no dependency; .msg has no stdlib parser. The import is lazy and
+# tolerant — a missing wheel degrades to a per-file error, never an import crash.
+extract-msg>=0.48.0
 
 starlette==0.50.0
 cryptography>=42.0.0,<46.0
