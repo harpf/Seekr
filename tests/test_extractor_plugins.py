@@ -247,3 +247,23 @@ def test_main_extractor_for_resolves_plugin(monkeypatch):
     ext._plugins_loaded = False
 
     assert isinstance(main_mod.extractor_for(".csv"), _GoodCsvExtractor)
+
+
+def test_real_example_plugin_loads_and_extracts(monkeypatch, tmp_path):
+    """The shipped example plugin under document_search/extractors/plugins/ is
+    discovered from the real drop-in dir and actually extracts a .csv file."""
+    monkeypatch.setattr(ext, "_load_entry_point_plugins", lambda: None)
+    ext._plugins_loaded = False
+    ext.load_plugins(force=True)
+
+    assert ".csv" in ext.supported_extensions()
+
+    csv_path = tmp_path / "data.csv"
+    csv_path.write_text("name,score\nAlice,10\nBob,7\n", encoding="utf-8")
+    extractor = ext.extractor_for(".csv")
+    result = extractor.extract(csv_path)
+    assert result.status == "ok"
+    assert result.blocks, "expected at least one content block"
+    joined = " ".join(b.text for b in result.blocks)
+    assert "Alice" in joined and "Bob" in joined
+    assert "score" in joined
