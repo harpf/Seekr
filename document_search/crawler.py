@@ -6,16 +6,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from document_search.config import AppConfig
-
-DOC_TYPE_MAP = {
-    ".pdf": "pdf",
-    ".docx": "docx",
-    ".pptx": "pptx",
-    ".txt": "txt",
-    ".md": "md",
-    ".doc": "doc",
-    ".ppt": "ppt",
-}
+from document_search.extractors import supported_extensions
 
 
 def _is_hidden(path: Path) -> bool:
@@ -23,7 +14,11 @@ def _is_hidden(path: Path) -> bool:
 
 
 def iter_documents(roots: list[Path], config: AppConfig) -> Iterator[Path]:
-    exts = {e.lower() for e in config.supported_extensions}
+    # A file is crawled only if its suffix is both enabled by the operator
+    # (config.supported_extensions) and backed by a registered extractor
+    # (built-in or plugin). The registry — not a hard-coded map — is the source
+    # of truth for "can we read this", so plugin file types flow through here.
+    exts = {e.lower() for e in config.supported_extensions} & supported_extensions()
     for root in roots:
         if not root.exists():
             continue
@@ -40,7 +35,7 @@ def iter_documents(roots: list[Path], config: AppConfig) -> Iterator[Path]:
                     if config.ignore_temp_office_files and path.name.startswith("~$"):
                         continue
                     suffix = path.suffix.lower()
-                    if suffix not in exts or suffix not in DOC_TYPE_MAP:
+                    if suffix not in exts:
                         continue
                     if path.stat().st_size > config.max_file_size_mb * 1024 * 1024:
                         continue
