@@ -590,24 +590,43 @@ class SqliteStore:
         """
         from document_search.services.file_service import normalized_content_hash
 
+        # One JOIN over only the un-hashed documents (idx_docs_content_hash covers
+        # the NULL lookup), instead of a per-document query — the old N+1 re-probed
+        # every block-less NULL document on EVERY store open (~120ms at 20k docs).
+        # The JOIN excludes block-less docs entirely, so steady-state is ~0 rows.
         rows = self.conn.execute(
-            "SELECT id FROM documents WHERE content_hash IS NULL"
+            """
+            SELECT cb.document_id AS doc_id, cb.text AS text
+            FROM documents d
+            JOIN content_blocks cb ON cb.document_id = d.id
+            WHERE d.content_hash IS NULL
+            ORDER BY cb.document_id, cb.block_number
+            """
         ).fetchall()
+
+        updates: list[tuple[str, int]] = []
+        current_doc: int | None = None
+        parts: list[str] = []
+
+        def _flush() -> None:
+            if current_doc is not None and parts:
+                ch = normalized_content_hash(" ".join(parts))
+                if ch is not None:
+                    updates.append((ch, current_doc))
+
         for row in rows:
-            doc_id = row["id"]
-            blocks = self.conn.execute(
-                "SELECT text FROM content_blocks WHERE document_id=? ORDER BY block_number",
-                (doc_id,),
-            ).fetchall()
-            if not blocks:
-                continue
-            combined = " ".join(b["text"] for b in blocks)
-            ch = normalized_content_hash(combined)
-            if ch is not None:
-                self.conn.execute(
-                    "UPDATE documents SET content_hash=? WHERE id=?", (ch, doc_id)
-                )
-        self.conn.commit()
+            if row["doc_id"] != current_doc:
+                _flush()
+                current_doc = row["doc_id"]
+                parts = []
+            parts.append(row["text"])
+        _flush()
+
+        if updates:
+            self.conn.executemany(
+                "UPDATE documents SET content_hash=? WHERE id=?", updates
+            )
+            self.conn.commit()
 
     # ── ACL management: groups & membership ────────────────────────────
 

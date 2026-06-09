@@ -104,6 +104,11 @@ def build_dataset(db_path: Path, docs: int, blocks_per: int) -> tuple[SqliteStor
     return store, uid
 
 
+def _first_visible_ids(conn, acl_sql: str, acl_params, n: int) -> list[int]:
+    rows = conn.execute(f"SELECT document_id FROM ({acl_sql}) LIMIT {n}", acl_params).fetchall()
+    return [r[0] for r in rows]
+
+
 def _explain(conn, label: str, sql: str, params) -> None:
     print(f"  EXPLAIN {label}:", flush=True)
     for row in conn.execute("EXPLAIN QUERY PLAN " + sql, params):
@@ -120,6 +125,9 @@ def run(store: SqliteStore, uid: int, repeats: int, explain: bool) -> None:
     status_size = f"SELECT COALESCE(SUM(d.file_size),0) FROM documents d WHERE d.id IN ({acl_sql})"
 
     timings = {
+        # Opening a fresh store runs schema-init + idempotent backfills; the
+        # worker opens one per job, so this is hot. Should stay in single-digit ms.
+        "store.open": _best_ms(lambda: SqliteStore(store.db_path), repeats),
         "visibility": _best_ms(
             lambda: c.execute(f"SELECT COUNT(*) FROM ({acl_sql})", acl_params).fetchone(), repeats
         ),
@@ -135,6 +143,17 @@ def run(store: SqliteStore, uid: int, repeats: int, explain: bool) -> None:
         ),
         "search.rare": _best_ms(
             lambda: search(store, "zürich", limit=25, user_id=uid, mode="keyword"), repeats
+        ),
+        # Browse = empty query (the _browse_all path: documents JOIN content_blocks
+        # ordered by modified_at). A distinct path from the FTS search above.
+        "browse": _best_ms(
+            lambda: search(store, "", limit=25, user_id=uid, mode="keyword"), repeats
+        ),
+        # Per-result marks/tags fetch that runs on every search (should be one
+        # batched query for the whole page, not N+1).
+        "marks.batch": _best_ms(
+            lambda: store.get_doc_marks_and_tags(uid, _first_visible_ids(c, acl_sql, acl_params, 25)),
+            repeats,
         ),
     }
 

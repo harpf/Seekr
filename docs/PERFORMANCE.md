@@ -64,6 +64,10 @@ values across machines.
   `X-Total-Approx`; the UI renders "1000+" when exceeded.
 - **Tuned SQLite connection**: WAL, `synchronous=NORMAL`, 32 MB page cache,
   256 MB mmap, `temp_store=MEMORY`, `busy_timeout=5000` (already in place).
+- **Cheaper store open** (`perf(store)`): `_backfill_content_hash` (run on every
+  `SqliteStore` construction — and the worker opens one per job) did an N+1, re-probing
+  every block-less un-hashed document on each open (~120 ms at 20k docs).
+  Rewritten as a single JOIN over only un-hashed docs → ~7 ms.
 - **Parallel indexing + OCR tuning** (`perf(index)`): the index job extracts
   documents in a thread pool (`INDEX_WORKERS`, DB writes serialised), OCR pages
   run batched/optionally parallel at a configurable DPI, and each Tesseract is
