@@ -1123,31 +1123,59 @@ async function startIndex() {
     if (progressFill) { progressFill.style.width = '5%'; progressFill.style.background = ''; }
     if (progressStatus) progressStatus.textContent = 'Starting job…';
 
-    const data = await api('/api/index/start', 'POST', {
-      paths: selectedPaths,
-    });
-    const id = data.job_id;
-    if (progressStatus) progressStatus.textContent = `Job ${id} started`;
-    let pct = 10;
+    const force = !!(document.getElementById('idxForce') && idxForce.checked);
+    const data = await api('/api/index/start', 'POST', { paths: selectedPaths, force });
+    _trackIndexJob(data.job_id, btn, progressFill, progressStatus);
+  } catch (e) {
+    showToast(e.message, 'err');
+    if (btn) btn.classList.remove('loading');
+  }
+}
 
-    const interval = setInterval(async () => {
-      try {
-        const j = await api(`/api/index/jobs/${id}`);
-        if (progressStatus) progressStatus.textContent = `${j.status} — processed: ${j.processed ?? 0}, errors: ${j.errors ?? 0}`;
-        if (j.status === 'finished' || j.status === 'error') {
-          clearInterval(interval);
-          if (btn) btn.classList.remove('loading');
-          if (progressFill) {
-            progressFill.style.width = '100%';
-            progressFill.style.background = j.status === 'finished' ? 'var(--green)' : 'var(--red)';
-          }
-          showToast(j.status === 'finished' ? 'Indexing complete' : 'Indexing failed', j.status === 'finished' ? 'ok' : 'err');
-        } else {
-          pct = Math.min(pct + 7, 88);
-          if (progressFill) progressFill.style.width = `${pct}%`;
+// Drive the shared index-progress UI for a running index_paths job.
+function _trackIndexJob(id, btn, progressFill, progressStatus) {
+  if (progressStatus) progressStatus.textContent = `Job ${id} started`;
+  let pct = 10;
+  const interval = setInterval(async () => {
+    try {
+      const j = await api(`/api/index/jobs/${id}`);
+      if (progressStatus) {
+        progressStatus.textContent =
+          `${j.status} — found: ${j.found ?? 0}, indexed: ${j.indexed ?? 0}, updated: ${j.updated ?? 0}, skipped: ${j.skipped ?? 0}, errors: ${j.errors ?? 0}`;
+      }
+      if (j.status === 'finished' || j.status === 'failed' || j.status === 'interrupted') {
+        clearInterval(interval);
+        if (btn) btn.classList.remove('loading');
+        const ok = j.status === 'finished';
+        if (progressFill) {
+          progressFill.style.width = '100%';
+          progressFill.style.background = ok ? 'var(--green)' : 'var(--red)';
         }
-      } catch (_) {}
-    }, 1200);
+        showToast(ok ? 'Indexing complete' : 'Indexing failed', ok ? 'ok' : 'err');
+      } else {
+        pct = Math.min(pct + 7, 88);
+        if (progressFill) progressFill.style.width = `${pct}%`;
+      }
+    } catch (_) {}
+  }, 1200);
+}
+
+// Global reindex: force re-extract every configured source path in one job.
+async function reindexAll() {
+  if (!confirm('Re-extract ALL configured source paths (force)? This re-runs extraction on every indexed file and can take a while.')) {
+    return;
+  }
+  const btn = document.getElementById('reindexAllBtn');
+  const progressWrap = document.getElementById('indexProgress');
+  const progressFill = document.getElementById('indexProgressFill');
+  const progressStatus = document.getElementById('indexProgressStatus');
+  try {
+    if (btn) btn.classList.add('loading');
+    if (progressWrap) progressWrap.classList.remove('hidden');
+    if (progressFill) { progressFill.style.width = '5%'; progressFill.style.background = ''; }
+    if (progressStatus) progressStatus.textContent = 'Starting full reindex…';
+    const data = await api('/api/index/reindex-all', 'POST', {});
+    _trackIndexJob(data.job_id, btn, progressFill, progressStatus);
   } catch (e) {
     showToast(e.message, 'err');
     if (btn) btn.classList.remove('loading');

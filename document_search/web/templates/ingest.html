@@ -167,10 +167,18 @@
                 </select>
               </div>
             </div>
+            <div class="f-col">
+              <label class="f-label"><input id="idxForce" type="checkbox" /> Force re-extract (ignore unchanged-file skip)</label>
+              <span class="f-hint">Re-runs extraction even when a file's hash/mtime is unchanged — use after enabling OCR or adding an extractor</span>
+            </div>
             <div class="btn-row">
               <button id="startIndexBtn" class="btn btn-p" onclick="startIndex()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                 Start Indexing
+              </button>
+              <button id="reindexAllBtn" class="btn btn-g admin-only hidden" onclick="reindexAll()" title="Force re-extract every configured source path">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+                Reindex all (force)
               </button>
             </div>
             <div id="indexProgress" class="progress-wrap hidden">

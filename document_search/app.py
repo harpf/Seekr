@@ -146,6 +146,9 @@ class LoginRequest(BaseModel):
 class IndexRequest(BaseModel):
     paths: list[str] = Field(min_length=1)
     config_path: str | None = None
+    # Re-extract files even when their hash + mtime are unchanged (e.g. after
+    # enabling OCR or adding an extractor). Off = incremental (skip unchanged).
+    force: bool = False
 
 
 class SearchRequest(BaseModel):
@@ -514,6 +517,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         from document_search.config import load_config
 
         paths = payload["paths"]
+        force = bool(payload.get("force"))
         config_path_override = payload.get("config_path")
         if config_path_override:
             cfg = load_config(Path(config_path_override))
@@ -530,7 +534,12 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             counts["found"] += 1
             fp = fingerprint(path)
             existing = db.get_document(str(fp.path))
-            if existing and existing["sha256"] == fp.sha256 and existing["modified_at"] == fp.modified_at.isoformat():
+            if (
+                not force
+                and existing
+                and existing["sha256"] == fp.sha256
+                and existing["modified_at"] == fp.modified_at.isoformat()
+            ):
                 counts["skipped"] += 1
                 counts["done"] += 1
                 _obs.INDEX_DOCS_TOTAL.labels(outcome="skipped").inc()
@@ -1535,10 +1544,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 pass
         return results
 
-    @app.post("/api/index/start")
-    def api_index_start(req: IndexRequest, x_auth_token: str | None = Header(default=None)):
-        admin_id = require_admin(x_auth_token)
-        for p in req.paths:
+    def _validate_index_paths(paths: list[str]) -> None:
+        for p in paths:
             if not p.strip():
                 raise HTTPException(status_code=400, detail="Path must not be empty.")
             # Normalize to canonical POSIX path and collapse any leading double-slashes
@@ -1548,9 +1555,48 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                     status_code=400,
                     detail=f"Path '{p}' is not allowed. Select a specific subdirectory.",
                 )
+
+    @app.post("/api/index/start")
+    def api_index_start(req: IndexRequest, x_auth_token: str | None = Header(default=None)):
+        admin_id = require_admin(x_auth_token)
+        _validate_index_paths(req.paths)
         job_id = job_store.enqueue(
             "index_paths",
-            payload={"paths": req.paths, "config_path": req.config_path},
+            payload={"paths": req.paths, "config_path": req.config_path, "force": req.force},
+            owner_user_id=admin_id,
+            max_retries=0,
+        )
+        return {"job_id": str(job_id)}
+
+    @app.post("/api/index/reindex-all")
+    def api_reindex_all(x_auth_token: str | None = Header(default=None)):
+        """Force re-extract every configured source path in one job.
+
+        Reads the source paths from config, bypasses the hash/mtime skip
+        (``force=True``) so existing documents are re-extracted — useful after
+        enabling OCR or adding an extractor.
+        """
+        admin_id = require_admin(x_auth_token)
+        source_paths: list[str] = []
+        if config_path.exists():
+            try:
+                raw = json.loads(config_path.read_text(encoding="utf-8"))
+                source_paths = [
+                    sp["path"]
+                    for sp in raw.get("source_paths", [])
+                    if isinstance(sp, dict) and sp.get("path")
+                ]
+            except Exception:
+                log.warning("Failed to read source_paths from config %s", config_path, exc_info=True)
+        if not source_paths:
+            raise HTTPException(
+                status_code=400,
+                detail="No source paths configured. Add paths under Config → Paths first.",
+            )
+        _validate_index_paths(source_paths)
+        job_id = job_store.enqueue(
+            "index_paths",
+            payload={"paths": source_paths, "force": True},
             owner_user_id=admin_id,
             max_retries=0,
         )
