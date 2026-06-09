@@ -43,12 +43,7 @@ from document_search import observability as _obs
 from document_search.auth import verify_password
 from document_search.config import AppConfig, load_config
 from document_search.crawler import iter_documents
-from document_search.extractors.docx_extractor import DocxTextExtractor
-from document_search.extractors.legacy_office_extractor import LegacyOfficeTextExtractor
-from document_search.extractors.md_extractor import MdTextExtractor
-from document_search.extractors.pdf_extractor import PdfTextExtractor
-from document_search.extractors.pptx_extractor import PptxTextExtractor
-from document_search.extractors.txt_extractor import TxtTextExtractor
+from document_search.extractors import extractor_for, load_plugins
 from document_search.index.search_service import (
     FtsQueryError,
     count_documents,
@@ -61,21 +56,6 @@ from document_search.services.ai_organizer import AiOrganizer
 from document_search.services.file_service import fingerprint
 
 log = logging.getLogger(__name__)
-
-# Singletons — instantiated once at import time, not on every request.
-_EXTRACTORS: dict[str, object] = {
-    ".pdf":  PdfTextExtractor(),
-    ".docx": DocxTextExtractor(),
-    ".pptx": PptxTextExtractor(),
-    ".txt":  TxtTextExtractor(),
-    ".md":   MdTextExtractor(),
-    ".doc":  LegacyOfficeTextExtractor(),
-    ".ppt":  LegacyOfficeTextExtractor(),
-}
-
-def extractor_for(ext: str):
-    return _EXTRACTORS.get(ext)
-
 
 # Thread-local store — one SQLite connection per OS thread (uvicorn worker thread).
 # Avoids the cost of creating+migrating a new connection on every request.
@@ -389,6 +369,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     app.state.rate_limiter = rate_limiter
     jobs: dict[str, JobState] = {}
     upload_root = Path(os.getenv("DOCUMENT_SEARCH_UPLOAD_ROOT", "/documents/uploads"))
+    # Discover third-party + drop-in extractor plugins once per process.
+    load_plugins()
     organizer = AiOrganizer()
     from document_search.services.embedding_service import EmbeddingService
     embedder = EmbeddingService()

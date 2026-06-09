@@ -7,12 +7,7 @@ from pathlib import Path
 
 from document_search.config import load_config
 from document_search.crawler import iter_documents
-from document_search.extractors.docx_extractor import DocxTextExtractor
-from document_search.extractors.legacy_office_extractor import LegacyOfficeTextExtractor
-from document_search.extractors.md_extractor import MdTextExtractor
-from document_search.extractors.pdf_extractor import PdfTextExtractor
-from document_search.extractors.pptx_extractor import PptxTextExtractor
-from document_search.extractors.txt_extractor import TxtTextExtractor
+from document_search.extractors import extractor_for, load_plugins
 from document_search.index.search_service import search
 from document_search.index.sqlite_store import SqliteStore
 from document_search.services.file_service import fingerprint
@@ -20,19 +15,8 @@ from document_search.services.file_service import fingerprint
 LOGGER = logging.getLogger("document_search")
 
 
-def extractor_for(ext: str):
-    return {
-        ".pdf": PdfTextExtractor(),
-        ".docx": DocxTextExtractor(),
-        ".pptx": PptxTextExtractor(),
-        ".txt": TxtTextExtractor(),
-        ".md": MdTextExtractor(),
-        ".doc": LegacyOfficeTextExtractor(),
-        ".ppt": LegacyOfficeTextExtractor(),
-    }.get(ext)
-
-
 def cmd_index(args):
+    load_plugins()
     cfg = load_config(Path(args.config) if args.config else None)
     store = SqliteStore(Path(args.db or cfg.database_path))
     roots = [Path(p) for p in args.paths]

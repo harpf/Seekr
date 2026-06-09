@@ -221,3 +221,29 @@ def test_load_plugins_is_idempotent(monkeypatch):
 
     ext.load_plugins(force=True)  # explicit re-run
     assert calls == {"entry": 2, "dropin": 2}
+
+
+def test_app_extractor_for_resolves_plugin(monkeypatch):
+    """document_search.app.extractor_for resolves a plugin suffix, proving app.py
+    routes through the shared registry rather than a private hard-coded dict."""
+    import document_search.app as app_mod
+
+    ep = _FakeEntryPoint("csv", "pkg:_GoodCsvExtractor", _GoodCsvExtractor)
+    _patch_entry_points(monkeypatch, [ep])
+    ext._plugins_loaded = False
+
+    assert isinstance(app_mod.extractor_for(".csv"), _GoodCsvExtractor)
+    # app.py must NOT carry a private hard-coded extractor dict anymore.
+    assert not hasattr(app_mod, "_EXTRACTORS")
+
+
+def test_main_extractor_for_resolves_plugin(monkeypatch):
+    """document_search.main.extractor_for resolves a plugin suffix too, proving
+    the CLI path shares the same registry."""
+    import document_search.main as main_mod
+
+    ep = _FakeEntryPoint("csv", "pkg:_GoodCsvExtractor", _GoodCsvExtractor)
+    _patch_entry_points(monkeypatch, [ep])
+    ext._plugins_loaded = False
+
+    assert isinstance(main_mod.extractor_for(".csv"), _GoodCsvExtractor)
