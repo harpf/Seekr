@@ -406,9 +406,18 @@ def count_documents(
         if path_filter:
             where.append("d.path LIKE ?")
             params.append(path_filter + "%")
+        # A document counts only if it has at least one (matching) content block —
+        # mirroring browse, which emits block-level rows. EXISTS preserves that
+        # semantic with an indexed lookup instead of scanning every block and
+        # de-duplicating (the old `JOIN content_blocks` + COUNT(DISTINCT)).
         if block_type:
-            where.append("cb.block_type = ?")
+            where.append(
+                "EXISTS (SELECT 1 FROM content_blocks cb "
+                "WHERE cb.document_id = d.id AND cb.block_type = ?)"
+            )
             params.append(block_type)
+        else:
+            where.append("EXISTS (SELECT 1 FROM content_blocks cb WHERE cb.document_id = d.id)")
         if modified_from:
             where.append("d.modified_at >= ?")
             params.append(modified_from)
@@ -433,18 +442,19 @@ def count_documents(
             where.append(f"d.id IN ({acl_sql})")
             params.extend(acl_params)
         sql = f"""
-            SELECT COUNT(DISTINCT d.id)
+            SELECT COUNT(*)
             FROM documents d
-            JOIN content_blocks cb ON cb.document_id = d.id
             WHERE {" AND ".join(where)}
         """
         return int(store.conn.execute(sql, tuple(params)).fetchone()[0])
 
+    # No `JOIN content_blocks` here: content_fts already holds one row per block
+    # and nothing below references a content_blocks column, so the join was pure
+    # overhead (an index probe per match).
     sql = """
         SELECT COUNT(DISTINCT c.document_id)
         FROM content_fts c
         JOIN documents d ON d.id = c.document_id
-        JOIN content_blocks b ON b.id = c.block_id
         WHERE content_fts MATCH ?
     """
     params = [match_query]
