@@ -126,7 +126,7 @@ The frontend is clean vanilla JS with a token-based CSS design system, but has c
 - **[M] Full audit log** of who searched/opened/moved what — leverages the provenance goals in AGENTS.md.
 - **[S] Per-user UI preferences** (default filters, results-per-page, theme) persisted server-side.
 - **[M] Webhooks / notifications** on index completion or new matching documents for a saved search.
-- **[L] Plugin/extractor API** so third parties can register new file-type extractors without forking.
+- **[L] Plugin/extractor API** — implemented; see docs/PLUGINS.md.
 - **[S] i18n.** The product/docs mix German and English; add a translation layer for the UI.
 - **[M] REST API versioning + OpenAPI polish** (the Swagger/wiki page already embeds the spec) and a documented public API contract for the HA-style integrations.
 
