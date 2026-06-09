@@ -292,6 +292,16 @@ class SqliteStore:
             self.conn.commit()
         except Exception:
             pass
+        # Index for owner-based visibility. Created AFTER the ALTER above (a legacy
+        # DB lacks the column until then) — same post-migration pattern as
+        # idx_docs_content_hash. Speeds up the owner branch of the ACL query.
+        try:
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_docs_owner ON documents(owner_principal_id)"
+            )
+            self.conn.commit()
+        except Exception:
+            pass
         # Migration: add principal_id column on users (links user -> their 'user' principal)
         try:
             self.conn.execute("ALTER TABLE users ADD COLUMN principal_id INTEGER")
