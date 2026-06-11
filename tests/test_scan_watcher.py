@@ -125,3 +125,27 @@ def test_manager_recover_skips_files_with_existing_rows(tmp_path):
     ib = ScanInbox(id="b", label="B", inbox_path=str(tmp_path), target_root=str(tmp_path / "t"))
     mgr.recover_orphans([ib], known_staging_paths={str(tracked)})
     assert enq == []
+
+
+def test_manager_reconfigure_updates_inbox_config(tmp_path):
+    """Reconfiguring with the same inbox id but changed settings updates the tracked config."""
+    inbox_id = "upd"
+    mgr = ScanWatcherManager(
+        data_dir=tmp_path / "data",
+        enqueue=lambda i, s, o: None,
+    )
+    ib_v1 = ScanInbox(
+        id=inbox_id, label="Upd", inbox_path=str(tmp_path),
+        target_root=str(tmp_path / "t"), enabled=True, poll_interval_seconds=999,
+    )
+    mgr.reconfigure([ib_v1])
+    assert mgr._inboxes[inbox_id].poll_interval_seconds == 999
+
+    ib_v2 = ScanInbox(
+        id=inbox_id, label="Upd", inbox_path=str(tmp_path),
+        target_root=str(tmp_path / "t"), enabled=True, poll_interval_seconds=888,
+    )
+    mgr.reconfigure([ib_v2])
+    assert mgr._inboxes[inbox_id].poll_interval_seconds == 888
+
+    mgr.stop_all()

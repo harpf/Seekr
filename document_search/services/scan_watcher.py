@@ -126,7 +126,7 @@ class ScanWatcherManager:
         try:
             from watchdog.events import FileSystemEventHandler
             from watchdog.observers import Observer
-        except Exception:
+        except ImportError:
             return
 
         manager = self
@@ -151,7 +151,7 @@ class ScanWatcherManager:
         except Exception:
             log.warning("watchdog observer failed for %s; polling only", inbox.id, exc_info=True)
 
-    def _stop_inbox(self, inbox_id: str) -> None:
+    def _stop_inbox(self, inbox_id: str) -> tuple[threading.Thread | None, object | None]:
         """Signal stop and collect handles; joining is done OUTSIDE the lock to
         avoid a deadlock where _poll_loop tries to acquire self._lock while the
         caller already holds it and is waiting on t.join()."""
@@ -161,17 +161,22 @@ class ScanWatcherManager:
         t = self._threads.pop(inbox_id, None)
         obs = self._observers.pop(inbox_id, None)
         self._inboxes.pop(inbox_id, None)
-        return t, obs  # type: ignore[return-value]
+        return t, obs
 
     def _join_handles(self, t: threading.Thread | None, obs: object | None,
-                      inbox_id: str) -> None:
-        """Join thread and observer OUTSIDE any lock."""
+                      inbox_id: str, *, timeout: float = 2.0) -> None:
+        """Join thread and observer OUTSIDE any lock.
+
+        ``timeout`` is the per-handle budget: it is used both for the thread
+        join and for the observer join so the worst-case wall-clock wait is
+        ``timeout * 2`` per inbox (thread + observer).
+        """
         if t is not None:
-            t.join(timeout=2.0)
+            t.join(timeout=timeout)
         if obs is not None:
             try:
                 obs.stop()  # type: ignore[attr-defined]
-                obs.join(timeout=2.0)  # type: ignore[attr-defined]
+                obs.join(timeout=timeout)  # type: ignore[attr-defined]
             except Exception:
                 log.warning("Failed to stop observer for %s", inbox_id, exc_info=True)
 
@@ -191,7 +196,7 @@ class ScanWatcherManager:
                 self._inboxes[inbox_id] = desired[inbox_id]
         # Join outside the lock to avoid deadlock with _poll_loop's brief lock acquisition.
         for inbox_id, t, obs in handles_to_join:
-            self._join_handles(t, obs, inbox_id)
+            self._join_handles(t, obs, inbox_id, timeout=2.0)
 
     def recover_orphans(self, inboxes: list[ScanInbox], *,
                         known_staging_paths: set[str]) -> None:
@@ -213,5 +218,6 @@ class ScanWatcherManager:
             for inbox_id in list(self._inboxes):
                 t, obs = self._stop_inbox(inbox_id)
                 handles_to_join.append((inbox_id, t, obs))
+        per_handle = timeout / 2
         for inbox_id, t, obs in handles_to_join:
-            self._join_handles(t, obs, inbox_id)
+            self._join_handles(t, obs, inbox_id, timeout=per_handle)
