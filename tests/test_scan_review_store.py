@@ -25,3 +25,5 @@ def test_migration_creates_table_on_legacy_db(tmp_path):
     assert db2.conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='scan_review'"
     ).fetchone() is not None
+    idx = {r[1] for r in db2.conn.execute("PRAGMA index_list(scan_review)").fetchall()}
+    assert "idx_scan_review_inbox_status" in idx
