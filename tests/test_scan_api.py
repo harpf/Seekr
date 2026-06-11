@@ -71,6 +71,13 @@ def test_save_config_persists_scan_inboxes_and_derives_id(tmp_path, monkeypatch)
     assert saved["scan_inboxes"][0]["inbox_path"] == str(inbox)
 
 
+def test_path_test_requires_auth(tmp_path, monkeypatch):
+    app, client, token, _ = _admin_client(tmp_path, monkeypatch)
+    r = client.post("/api/scan/inboxes/test",
+                    json={"inbox_path": str(tmp_path), "target_root": str(tmp_path)})
+    assert r.status_code == 401
+
+
 def test_save_config_rejects_invalid_scan_inbox(tmp_path, monkeypatch):
     target = tmp_path / "out"
     (target / "in").mkdir(parents=True)

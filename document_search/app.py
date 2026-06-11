@@ -2522,6 +2522,9 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
 
     @app.post("/api/scan/inboxes/test")
     def api_scan_inbox_test(req: ScanInboxTestRequest, x_auth_token: str | None = Header(default=None)):
+        # Probe endpoint for the config UI "Test" button: always HTTP 200 with an
+        # {ok, error} envelope so the UI can show the reason inline (mirrors
+        # /api/paths/test). Validation failures are not HTTP errors here.
         require_admin(x_auth_token)
         from document_search.services.scan_inbox_config import (
             ScanInbox,
