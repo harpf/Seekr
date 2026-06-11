@@ -1,13 +1,24 @@
-"""Sole read/write surface for the scan_review queue. Wraps a SqliteStore so it
-shares the per-thread connection + WAL semantics of the rest of the index layer."""
+"""Sole read/write surface for the scan_review queue.
+
+Construct one ScanReviewStore per request or per worker job, wrapping a
+thread-appropriate SqliteStore (e.g. ``ScanReviewStore(store())`` in a request
+handler, ``ScanReviewStore(SqliteStore(db_path))`` in a worker).  Do NOT share
+a single instance across threads — like the rest of the index layer each thread
+uses its own sqlite connection (WAL mode handles cross-connection concurrency).
+No internal lock is needed because instances are not shared.
+"""
 from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from document_search.index.sqlite_store import SqliteStore
 
 
 class ScanReviewStore:
-    def __init__(self, store) -> None:
+    def __init__(self, store: SqliteStore) -> None:
         self._store = store
         self.conn = store.conn
 
