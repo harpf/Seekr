@@ -2628,6 +2628,11 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             dest_dir.mkdir(parents=True, exist_ok=True)
             new_path = dest_dir / staged.name
             shutil.move(str(staged), str(new_path))
+            # Partial-failure note: the file move is committed before the DB updates.
+            # If a later step raises (-> 500), the file is already at new_path while the
+            # review stays 'pending'; a retried confirm then sees the staged file gone
+            # (410). Operator recovery: re-file manually or re-run ingest. Acceptable for
+            # a local single-writer deployment.
             db.move_document(row["document_id"], str(new_path))
             if req.tags:
                 db.set_tags(user_id, row["document_id"], req.tags)
@@ -2683,11 +2688,11 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         _require_inbox_access(user_id, row["inbox_id"])
         if row["status"] != "error":
             raise HTTPException(status_code=409, detail="Only error reviews can be retried")
+        ScanReviewStore(store()).set_pending(review_id)
         job_store.enqueue("scan_ingest", {
             "inbox_id": row["inbox_id"], "staging_path": row["staging_path"],
             "original_filename": row["original_filename"],
         }, owner_user_id=user_id, max_retries=0)
-        ScanReviewStore(store()).set_pending(review_id)
         _audit(user_id, "scan.review.retry", target_type="scan_review",
                target_id=review_id, detail={"inbox": row["inbox_id"]}, request=request)
         return {"status": "retrying"}

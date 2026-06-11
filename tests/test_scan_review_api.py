@@ -145,3 +145,9 @@ def test_non_reviewer_cannot_access_inbox(tmp_path, monkeypatch):
     conf = client.post(f"/api/scan/review/{rid}/confirm", headers={"X-Auth-Token": bob_token},
                        json={"folder": "Rechnungen", "tags": []})
     assert conf.status_code == 403
+    folders = client.get(f"/api/scan/review/{rid}/folders", headers={"X-Auth-Token": bob_token})
+    assert folders.status_code == 403
+    rej = client.post(f"/api/scan/review/{rid}/reject", headers={"X-Auth-Token": bob_token})
+    assert rej.status_code == 403
+    retry = client.post(f"/api/scan/review/{rid}/retry", headers={"X-Auth-Token": bob_token})
+    assert retry.status_code == 403
