@@ -189,7 +189,7 @@ class UiConfigRequest(BaseModel):
     ollama_url: str | None = None
     ollama_model: str | None = None
     ocr: OcrSettings = Field(default_factory=OcrSettings)
-    scan_inboxes: list[dict] = Field(default_factory=list)
+    scan_inboxes: list[dict] | None = None
 
 
 class ScanInboxTestRequest(BaseModel):
@@ -1328,14 +1328,34 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             parse_scan_inboxes,
             validate_inbox_paths,
         )
-        try:
-            parsed_inboxes = parse_scan_inboxes(req.scan_inboxes)
-            for ib in parsed_inboxes:
-                validate_inbox_paths(ib)
-        except ScanInboxConfigError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid scan inbox: {e}")
+        # Build the config dict; model_dump() leaves scan_inboxes as None when
+        # omitted — we must always write a concrete list to the file.
         data = req.model_dump()
-        data["scan_inboxes"] = [ib.to_dict() for ib in parsed_inboxes]
+        if req.scan_inboxes is None:
+            # Caller did not send scan_inboxes — preserve whatever is on disk.
+            existing_inboxes: list = []
+            if config_path.exists():
+                try:
+                    existing_inboxes = json.loads(
+                        config_path.read_text(encoding="utf-8")
+                    ).get("scan_inboxes", [])
+                except Exception:
+                    log.warning("Could not read existing scan_inboxes from config; defaulting to []", exc_info=True)
+            data["scan_inboxes"] = existing_inboxes
+            # Do NOT reconfigure the watcher — nothing changed.
+        else:
+            # Caller sent an explicit list (possibly empty): parse, validate, persist.
+            try:
+                parsed_inboxes = parse_scan_inboxes(req.scan_inboxes)
+                for ib in parsed_inboxes:
+                    validate_inbox_paths(ib)
+            except ScanInboxConfigError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid scan inbox: {e}")
+            data["scan_inboxes"] = [ib.to_dict() for ib in parsed_inboxes]
+            try:
+                app.state.scan_watcher_manager.reconfigure(parsed_inboxes)
+            except Exception:
+                log.warning("Failed to reconfigure scan watchers after config save", exc_info=True)
         config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         if req.ollama_url:
             organizer.base_url = req.ollama_url.rstrip("/")
@@ -1347,10 +1367,6 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         os.environ["DOCUMENT_SEARCH_OCR_LANG"] = "+".join(req.ocr.languages) if req.ocr.languages else "deu+eng"
         os.environ["DOCUMENT_SEARCH_FORCE_OCR"] = "true" if req.ocr.force_ocr else "false"
         os.environ["DOCUMENT_SEARCH_OCR_DPI"] = str(req.ocr.dpi or 200)
-        try:
-            app.state.scan_watcher_manager.reconfigure(parsed_inboxes)
-        except Exception:
-            log.warning("Failed to reconfigure scan watchers after config save", exc_info=True)
         _audit(
             admin_id,
             "config.save",

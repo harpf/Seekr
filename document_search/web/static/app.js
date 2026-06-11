@@ -1291,7 +1291,6 @@ async function saveConfig() {
         force_ocr: !!(document.getElementById('cfgOcrForce') && cfgOcrForce.checked),
         dpi: Number(cfgOcrDpi?.value || 200),
       },
-      scan_inboxes: _scanInboxes,
     };
     await api('/api/config', 'POST', payload);
     showToast('Configuration saved', 'ok');
@@ -3337,7 +3336,7 @@ const scanInboxConfigModule = (() => {
       if (gSel) {
         const saved = _selValues('scanInboxGroups');
         gSel.innerHTML = (groups || []).map(g =>
-          `<option value="${escHtml(g.external_id || g.name)}">${escHtml(g.label || g.name || g.external_id)}</option>`
+          `<option value="${escHtml(g.external_id)}">${escHtml(g.display_name || g.external_id)}</option>`
         ).join('');
         _setSelValues('scanInboxGroups', saved);
       }
@@ -3480,7 +3479,7 @@ const scanInboxConfigModule = (() => {
     try {
       const r = await api('/api/scan/inboxes/test', 'POST', { inbox_path, target_root });
       if (testMsg) {
-        testMsg.textContent = r.ok ? 'Test erfolgreich' : ('Fehler: ' + escHtml(r.error || 'Unbekannt'));
+        testMsg.textContent = r.ok ? 'Test erfolgreich' : ('Fehler: ' + (r.error || 'Unbekannt'));
         testMsg.className = 'feedback ' + (r.ok ? 'ok' : 'err');
       }
     } catch (e) {
@@ -3499,6 +3498,10 @@ const scanInboxConfigModule = (() => {
       await api('/api/config', 'POST', payload);
       showToast('Scan-Eingänge gespeichert', 'ok');
       setText('scanInboxSaveResult', 'Gespeichert', 'ok');
+      // Reload from server so newly-added inboxes reflect their server-derived ids.
+      const fresh = await api('/api/config');
+      _scanInboxes = (fresh && fresh.scan_inboxes) || [];
+      renderList();
     } catch (e) {
       showToast(e.message, 'err');
       setText('scanInboxSaveResult', e.message, 'err');

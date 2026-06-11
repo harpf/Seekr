@@ -92,3 +92,68 @@ def test_save_config_rejects_invalid_scan_inbox(tmp_path, monkeypatch):
     }
     r = client.post("/api/config", headers={"X-Auth-Token": token}, json=payload)
     assert r.status_code == 400
+
+
+def test_save_config_without_scan_inboxes_preserves_existing(tmp_path, monkeypatch):
+    """Omitting scan_inboxes from the payload must not wipe the previously-saved inboxes."""
+    inbox = tmp_path / "in"
+    inbox.mkdir()
+    target = tmp_path / "out"
+    target.mkdir()
+    app, client, token, config = _admin_client(tmp_path, monkeypatch)
+    # First save: persist a valid scan inbox.
+    first_payload = {
+        "database_path": str(tmp_path / "document_index.db"),
+        "supported_extensions": [".pdf"],
+        "exclude_dirs": [],
+        "exclude_patterns": [],
+        "max_file_size_mb": 100,
+        "scan_inboxes": [{"label": "Scan HR", "inbox_path": str(inbox), "target_root": str(target)}],
+    }
+    r = client.post("/api/config", headers={"X-Auth-Token": token}, json=first_payload)
+    assert r.status_code == 200, r.text
+    # Second save: General-tab style — scan_inboxes key omitted entirely.
+    second_payload = {
+        "database_path": str(tmp_path / "document_index.db"),
+        "supported_extensions": [".pdf", ".txt"],
+        "exclude_dirs": [],
+        "exclude_patterns": [],
+        "max_file_size_mb": 50,
+    }
+    r2 = client.post("/api/config", headers={"X-Auth-Token": token}, json=second_payload)
+    assert r2.status_code == 200, r2.text
+    saved = json.loads(config.read_text(encoding="utf-8"))
+    assert saved["scan_inboxes"], "scan_inboxes must not be wiped when omitted from payload"
+    assert saved["scan_inboxes"][0]["id"] == "scan-hr"
+
+
+def test_save_config_without_scan_inboxes_does_not_revalidate_stale_path(tmp_path, monkeypatch):
+    """When scan_inboxes is omitted, a stale (deleted) inbox path must NOT cause a 400."""
+    inbox = tmp_path / "in"
+    inbox.mkdir()
+    target = tmp_path / "out"
+    target.mkdir()
+    app, client, token, config = _admin_client(tmp_path, monkeypatch)
+    # Persist a config that references the inbox path.
+    first_payload = {
+        "database_path": str(tmp_path / "document_index.db"),
+        "supported_extensions": [".pdf"],
+        "exclude_dirs": [],
+        "exclude_patterns": [],
+        "max_file_size_mb": 100,
+        "scan_inboxes": [{"label": "Scan Test", "inbox_path": str(inbox), "target_root": str(target)}],
+    }
+    r = client.post("/api/config", headers={"X-Auth-Token": token}, json=first_payload)
+    assert r.status_code == 200, r.text
+    # Delete the inbox directory so any path validation would now fail.
+    inbox.rmdir()
+    # General-tab save without scan_inboxes — must succeed (no revalidation).
+    second_payload = {
+        "database_path": str(tmp_path / "document_index.db"),
+        "supported_extensions": [".pdf"],
+        "exclude_dirs": [],
+        "exclude_patterns": [],
+        "max_file_size_mb": 100,
+    }
+    r2 = client.post("/api/config", headers={"X-Auth-Token": token}, json=second_payload)
+    assert r2.status_code == 200, r2.text
