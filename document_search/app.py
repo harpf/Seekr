@@ -298,6 +298,12 @@ class GrantRequest(BaseModel):
     permission: str  # 'read' | 'write'
 
 
+class ScanConfirmRequest(BaseModel):
+    folder: str
+    tags: list[str] = Field(default_factory=list)
+    new_folder: bool = False
+
+
 class RemoveDuplicatesRequest(BaseModel):
     keep_id: int
     remove_ids: list[int]
@@ -2538,6 +2544,153 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         except ScanInboxConfigError as e:
             return {"ok": False, "error": str(e)}
         return {"ok": True}
+
+    # ── Scan review API ────────────────────────────────────────────────
+
+    def _authorized_inbox_ids(user_id: int) -> list[str]:
+        db = store()
+        if db.get_user_role(user_id) == "admin":
+            return [ib.id for ib in app.state.current_scan_inboxes()]
+        username = db.get_username(user_id)
+        groups = db.user_group_external_ids(user_id)
+        out = []
+        for ib in app.state.current_scan_inboxes():
+            if username in ib.reviewers_users or (groups & set(ib.reviewers_groups)):
+                out.append(ib.id)
+        return out
+
+    def _require_inbox_access(user_id: int, inbox_id: str) -> None:
+        if inbox_id not in _authorized_inbox_ids(user_id):
+            raise HTTPException(status_code=403, detail="Not authorized for this scan inbox")
+
+    def _scan_review_or_404(review_id: int):
+        from document_search.services.scan_review_store import ScanReviewStore
+        row = ScanReviewStore(store()).get(review_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Review not found")
+        return row
+
+    @app.get("/api/scan/inboxes")
+    def api_scan_inboxes(x_auth_token: str | None = Header(default=None)):
+        user_id = require_user(x_auth_token)
+        allowed = set(_authorized_inbox_ids(user_id))
+        return [{"id": ib.id, "label": ib.label}
+                for ib in app.state.current_scan_inboxes() if ib.id in allowed]
+
+    @app.get("/api/scan/review")
+    def api_scan_review_list(inbox: str | None = None, status: str | None = None,
+                             x_auth_token: str | None = Header(default=None)):
+        from document_search.services.scan_review_store import ScanReviewStore
+        user_id = require_user(x_auth_token)
+        allowed = _authorized_inbox_ids(user_id)
+        inbox_ids = [inbox] if inbox else allowed
+        inbox_ids = [i for i in inbox_ids if i in allowed]
+        return ScanReviewStore(store()).list_reviews(inbox_ids=inbox_ids, status=status)
+
+    @app.get("/api/scan/review/{review_id}/folders")
+    def api_scan_review_folders(review_id: int, x_auth_token: str | None = Header(default=None)):
+        user_id = require_user(x_auth_token)
+        row = _scan_review_or_404(review_id)
+        _require_inbox_access(user_id, row["inbox_id"])
+        inbox = _inbox_by_id(row["inbox_id"])
+        if inbox is None:
+            raise HTTPException(status_code=404, detail="Inbox no longer configured")
+        return _existing_target_subfolders(inbox.target_root)
+
+    @app.post("/api/scan/review/{review_id}/confirm")
+    def api_scan_review_confirm(review_id: int, req: ScanConfirmRequest, request: Request,
+                                x_auth_token: str | None = Header(default=None)):
+        from document_search.services.scan_review_store import ScanReviewStore
+        user_id = require_user(x_auth_token)
+        row = _scan_review_or_404(review_id)
+        _require_inbox_access(user_id, row["inbox_id"])
+        if row["status"] != "pending":
+            raise HTTPException(status_code=409, detail=f"Review is {row['status']}, not pending")
+        inbox = _inbox_by_id(row["inbox_id"])
+        if inbox is None:
+            raise HTTPException(status_code=404, detail="Inbox no longer configured")
+
+        target_root = Path(inbox.target_root).resolve()
+        folder = (req.folder or "").strip()
+        if not folder or "\x00" in folder:
+            raise HTTPException(status_code=400, detail="Invalid folder")
+        dest_dir = (target_root / folder).resolve()
+        if not (dest_dir == target_root or dest_dir.is_relative_to(target_root)):
+            raise HTTPException(status_code=400, detail="folder escapes target_root")
+        if not req.new_folder and not dest_dir.is_dir():
+            raise HTTPException(status_code=400, detail="folder does not exist (set new_folder to create)")
+
+        db = store()
+        staged = Path(row["staging_path"])
+        if not staged.exists():
+            raise HTTPException(status_code=410, detail="Staged file is gone")
+        try:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            new_path = dest_dir / staged.name
+            shutil.move(str(staged), str(new_path))
+            db.move_document(row["document_id"], str(new_path))
+            if req.tags:
+                db.set_tags(user_id, row["document_id"], req.tags)
+            db.restore_public_read(row["document_id"])
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Filing failed: {e}")
+
+        db.record_ai_decision(
+            kind="scan_filing_confirmed", model=None, prompt_sha256="",
+            document_id=row["document_id"],
+            output={"chosen_folder": folder, "tags": req.tags,
+                    "suggested_folder": row["suggested_folder"],
+                    "accepted_suggestion": folder == (row["suggested_folder"] or "")},
+            applied=1, user_id=user_id,
+        )
+        ScanReviewStore(db).mark_filed(review_id, reviewed_by=db.get_username(user_id))
+        _audit(user_id, "scan.review.confirm", target_type="document",
+               target_id=row["document_id"],
+               detail={"inbox": row["inbox_id"], "folder": folder}, request=request)
+        return {"status": "filed", "path": str(new_path)}
+
+    @app.post("/api/scan/review/{review_id}/reject")
+    def api_scan_review_reject(review_id: int, request: Request,
+                               x_auth_token: str | None = Header(default=None)):
+        from document_search.services.scan_review_store import ScanReviewStore
+        user_id = require_user(x_auth_token)
+        row = _scan_review_or_404(review_id)
+        _require_inbox_access(user_id, row["inbox_id"])
+        db = store()
+        if row["document_id"] is not None:
+            db.delete_documents([row["document_id"]])
+        staged = Path(row["staging_path"])
+        if staged.exists():
+            rejected_dir = staged.parent.parent / "rejected"
+            rejected_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.move(str(staged), str(rejected_dir / staged.name))
+            except OSError:
+                log.warning("Failed to move rejected scan %s", staged, exc_info=True)
+        ScanReviewStore(db).mark_rejected(review_id, reviewed_by=db.get_username(user_id))
+        _audit(user_id, "scan.review.reject", target_type="scan_review",
+               target_id=review_id, detail={"inbox": row["inbox_id"]}, request=request)
+        return {"status": "rejected"}
+
+    @app.post("/api/scan/review/{review_id}/retry")
+    def api_scan_review_retry(review_id: int, request: Request,
+                              x_auth_token: str | None = Header(default=None)):
+        from document_search.services.scan_review_store import ScanReviewStore
+        user_id = require_user(x_auth_token)
+        row = _scan_review_or_404(review_id)
+        _require_inbox_access(user_id, row["inbox_id"])
+        if row["status"] != "error":
+            raise HTTPException(status_code=409, detail="Only error reviews can be retried")
+        job_store.enqueue("scan_ingest", {
+            "inbox_id": row["inbox_id"], "staging_path": row["staging_path"],
+            "original_filename": row["original_filename"],
+        }, owner_user_id=user_id, max_retries=0)
+        ScanReviewStore(store()).set_pending(review_id)
+        _audit(user_id, "scan.review.retry", target_type="scan_review",
+               target_id=review_id, detail={"inbox": row["inbox_id"]}, request=request)
+        return {"status": "retrying"}
 
     # ── Path test & network mount ──────────────────────────────────────
 

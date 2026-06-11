@@ -1069,6 +1069,14 @@ class SqliteStore:
             "SELECT id, username, role, created_at FROM users WHERE id=?", (user_id,)
         ).fetchone()
 
+    def get_username(self, user_id: int) -> str | None:
+        row = self.conn.execute("SELECT username FROM users WHERE id=?", (user_id,)).fetchone()
+        return row["username"] if row else None
+
+    def get_user_role(self, user_id: int) -> str | None:
+        row = self.conn.execute("SELECT role FROM users WHERE id=?", (user_id,)).fetchone()
+        return row["role"] if row else None
+
     def get_user_principal_id(self, user_id: int) -> int | None:
         row = self.conn.execute(
             "SELECT principal_id FROM users WHERE id=?", (user_id,)
