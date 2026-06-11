@@ -485,6 +485,45 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     )
     app.state.scheduler = scheduler
 
+    # ── Scan watcher manager ──────────────────────────────────────────────
+    # Use os.path string ops (not Path()) so create_app stays robust when tests
+    # monkeypatch os.name to "posix" — pathlib selects the path flavour from
+    # os.name and would raise NotImplementedError on Windows.
+    _data_dir_str: str = os.path.dirname(os.path.abspath(db_path)) or "."
+
+    def _enqueue_scan_ingest(inbox_id: str, staging_path: str, original_filename: str) -> None:
+        job_store.enqueue("scan_ingest", {
+            "inbox_id": inbox_id,
+            "staging_path": staging_path,
+            "original_filename": original_filename,
+        }, owner_user_id=None, max_retries=0)
+
+    def _current_scan_inboxes():
+        from document_search.services.scan_inbox_config import parse_scan_inboxes
+        raw = []
+        if config_path.exists():
+            try:
+                raw = json.loads(config_path.read_text(encoding="utf-8")).get("scan_inboxes", [])
+            except Exception:
+                log.warning("Failed to read scan_inboxes from config", exc_info=True)
+        try:
+            return parse_scan_inboxes(raw)
+        except Exception:
+            log.warning("Invalid scan_inboxes config; watcher idle", exc_info=True)
+            return []
+
+    # Build the ScanWatcherManager eagerly (before startup) so that
+    # app.state.scan_watcher_manager is always available (e.g. for tests that
+    # call create_app without triggering the startup event). ScanWatcherManager
+    # __init__ only stores the data_dir and enqueue callback — no threads are
+    # started here; that happens in _start_scan_watchers below.
+    from document_search.services.scan_watcher import ScanWatcherManager
+    scan_watcher_manager = ScanWatcherManager(
+        data_dir=Path(_data_dir_str), enqueue=_enqueue_scan_ingest
+    )
+    app.state.scan_watcher_manager = scan_watcher_manager
+    app.state.current_scan_inboxes = _current_scan_inboxes
+
     @app.on_event("startup")
     def _start_worker() -> None:
         job_store.mark_interrupted_running_jobs()
@@ -498,6 +537,25 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         if scheduler is not None:
             scheduler.stop(timeout=5.0)
         worker.stop(timeout=5.0)
+
+    @app.on_event("startup")
+    def _start_scan_watchers() -> None:
+        try:
+            inboxes = _current_scan_inboxes()
+            from document_search.services.scan_review_store import ScanReviewStore
+            _recovery_db = SqliteStore(Path(db_path))
+            known = ScanReviewStore(_recovery_db).staging_paths_with_rows()
+            scan_watcher_manager.recover_orphans(inboxes, known_staging_paths=known)
+            scan_watcher_manager.reconfigure(inboxes)
+        except Exception:
+            log.exception("Failed to start scan watchers")
+
+    @app.on_event("shutdown")
+    def _stop_scan_watchers() -> None:
+        try:
+            scan_watcher_manager.stop_all(timeout=5.0)
+        except Exception:
+            log.warning("Error stopping scan watchers", exc_info=True)
 
     # Opt-in periodic backup scheduler. Disabled by default (interval 0); enable
     # by setting DOCUMENT_SEARCH_BACKUP_INTERVAL_HOURS to a positive value. It

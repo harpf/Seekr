@@ -146,3 +146,22 @@ def test_scan_ingest_completes_when_ai_raises(tmp_path, monkeypatch):
     rows = ScanReviewStore(db).list_reviews(inbox_ids=["b"], status="pending")
     assert len(rows) == 1
     assert rows[0]["suggested_folder"] is None
+
+
+def test_watcher_manager_wired_on_app(tmp_path, monkeypatch):
+    db_path = tmp_path / "document_index.db"
+    config = tmp_path / "config.json"
+    (tmp_path / "in").mkdir()
+    (tmp_path / "out").mkdir()
+    config.write_text(json.dumps({
+        "database_path": str(db_path),
+        "scan_inboxes": [{"id": "b", "label": "B", "inbox_path": str(tmp_path / "in"),
+                          "target_root": str(tmp_path / "out"), "enabled": True}],
+    }), encoding="utf-8")
+    monkeypatch.setenv("DOCUMENT_SEARCH_CONFIG_PATH", str(config))
+    app = create_app(str(db_path))
+    assert app.state.scan_watcher_manager is not None
+    # The enqueue bridge creates a scan_ingest job.
+    app.state.scan_watcher_manager._enqueue("b", str(tmp_path / "in" / "x.pdf"), "x.pdf")
+    jobs = app.state.job_store.list_jobs(limit=10)
+    assert any(j["kind"] == "scan_ingest" for j in jobs)
