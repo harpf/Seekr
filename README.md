@@ -18,6 +18,7 @@ A self-hosted document indexing and search system with optional local AI assista
 - [Search](#search)
 - [Tags](#tags)
 - [File Upload & AI Filing](#file-upload--ai-filing)
+- [Scan Inboxes](#scan-inboxes)
 - [AI Features](#ai-features)
 - [SSL / TLS](#ssl--tls)
 - [GPU Acceleration (Ollama)](#gpu-acceleration-ollama)
@@ -351,6 +352,76 @@ If Ollama is running and a model is loaded, an **AI Filing Suggestion** card app
 
 - **Apply & move file** — physically moves the file and updates the index record
 - **Dismiss** — ignores the suggestion
+
+---
+
+## Scan Inboxes
+
+Scan inboxes connect physical-document scanners (or any process that drops files into a watched folder) to the Seekr index. Files land in a designated inbox path, Seekr detects them automatically, runs OCR, generates an AI filing suggestion constrained to the existing subfolders of the target tree, and queues the result for a human reviewer to confirm or correct before the file is permanently filed.
+
+### Overview
+
+| Stage | What happens |
+|---|---|
+| **Drop** | Scanner drops a file into the inbox folder (PDF, JPEG, PNG, TIFF) |
+| **Claim** | Seekr's watcher moves the stable file into an internal staging area (`scan-staging/<inbox-id>/pending-review/`) |
+| **Extract + OCR** | The scan extractor runs OCR on every page (always, regardless of global OCR settings) |
+| **AI suggest** | Ollama proposes a target subfolder (within `target_root`) and tags; the suggestion is constrained to existing subfolders |
+| **Review queue** | The item appears in **Ingest → Scan** for authorised reviewers |
+| **Confirm / Reject** | Confirming moves the file to `target_root/<folder>` and indexes it normally; rejecting moves it to `scan-staging/<inbox-id>/rejected/` |
+
+### Supported file types
+
+| Extension | Method |
+|---|---|
+| `.pdf` | Native text extraction where available; OCR applied to image-only pages |
+| `.jpg` / `.jpeg` / `.png` / `.tif` / `.tiff` | Full OCR via Tesseract |
+
+### Stability window
+
+Files are not claimed immediately on arrival. A file is considered ready only when its size and modification time have been unchanged for `stability_seconds` (default **300 s / 5 minutes**). This prevents partial uploads from being picked up mid-write.
+
+### Event detection
+
+Each inbox runs a background polling loop at `poll_interval_seconds` (default **60 s**). When the optional `watchdog` Python package is installed, filesystem events trigger an additional immediate scan on each change, reducing latency to near-zero. Polling remains fully functional without `watchdog`.
+
+### Configuring inboxes
+
+Admins configure scan inboxes at **Config → Scan-Eingänge** (Config → Scan Inboxes). Each inbox has the following fields:
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `label` | Yes | — | Human-readable name; the `id` is auto-derived from the label (slug) if not set explicitly |
+| `inbox_path` | Yes | — | Absolute path Seekr watches for incoming files |
+| `target_root` | Yes | — | Absolute path of the document tree to file into; AI suggestions are limited to existing subfolders |
+| `reviewers.groups` | No | `[]` | Group names whose members can review items from this inbox |
+| `reviewers.users` | No | `[]` | Individual usernames with review access (admins always have access) |
+| `stability_seconds` | No | `300` | Seconds a file must be unchanged before it is picked up (minimum 30) |
+| `poll_interval_seconds` | No | `60` | How often the polling loop checks the inbox (minimum 5) |
+| `enabled` | No | `true` | Set to `false` to pause the inbox without deleting its configuration |
+
+A **Testen** (Test) button validates that both `inbox_path` and `target_root` exist, are directories, and do not overlap.
+
+### The review queue
+
+Go to **Ingest → Scan** (visible to admins and any user assigned as a reviewer). Each pending item shows:
+
+- the original filename
+- the AI-suggested target subfolder and tags
+- the model's reasoning
+
+**Actions available to reviewers:**
+
+| Action | Effect |
+|---|---|
+| **Confirm** | Moves the file to `target_root/<suggested_folder>`, indexes it, sets its ACL to normal visibility |
+| **Confirm with new folder** | Same as Confirm, but lets the reviewer type a new subfolder name that does not yet exist |
+| **Reject** | Moves the file to `scan-staging/<inbox-id>/rejected/`; removes it from the queue |
+| **Retry** | Re-queues an item that is in `error` status for another extraction attempt |
+
+### Access and visibility
+
+Scanned documents are kept private until filed. While in the review queue they are indexed under an explicit ACL (only the reviewer users/groups and admins can see them via search). After a reviewer confirms the item, the file is re-indexed at its final path with normal public-to-authenticated-users visibility.
 
 ---
 
