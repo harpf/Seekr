@@ -2460,7 +2460,7 @@ function copyHaYaml() {
 
 // ── Nav & bootstrap ────────────────────────────────────────────────
 function initNav() {
-  const map = { home: '/', search: '/search', ingest: '/ingest', config: '/config', jobs: '/jobs', wiki: '/wiki' };
+  const map = { home: '/', search: '/search', ingest: '/ingest', scan: '/scan', config: '/config', jobs: '/jobs', wiki: '/wiki' };
   const activeHref = map[document.body?.dataset?.page || ''];
   document.querySelectorAll('.nav-links a').forEach(link => {
     if (link.getAttribute('href') === activeHref) link.classList.add('active');

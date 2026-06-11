@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Seekr</title>
+  <title>Scan · Seekr</title>
   <link rel="icon" href="data:," />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
-<body class="wrap" data-page="home">
+<body class="wrap" data-page="scan">
 
   <a class="skip-link" href="#main">Skip to main content</a>
 
@@ -30,7 +30,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           <span class="nav-lbl">Ingest</span>
         </a>
-        <a href="/scan">
+        <a href="/scan" aria-current="page">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
           <span class="nav-lbl">Scan</span>
         </a>
@@ -62,101 +62,48 @@
   <main class="main" id="main" tabindex="-1">
     <div class="container">
 
-      <!-- ── Auth gate (shown when logged out) ── -->
+      <!-- ── Auth gate ── -->
+      {% set gate_title = "Scan-Posteingang" %}
+      {% set gate_subtitle = "Anmelden, um gescannte Dokumente zu prüfen und abzulegen." %}
       {% include "_partials/auth_gate.html" with context %}
 
-      <!-- ── Dashboard (shown when logged in) ── -->
-      <div id="statusPanel" class="hidden">
+      <!-- ── Scan panel ── -->
+      <div id="appPanel" class="hidden">
+
         <div class="pg-head">
-          <h1>Dashboard</h1>
-          <p id="welcomeText" class="muted">System overview and quick access.</p>
-        </div>
-
-        <div class="stats-row">
-          <div class="stat">
-            <div class="stat-row1">
-              <span class="stat-label">Documents</span>
-              <div class="stat-ico">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-              </div>
-            </div>
-            <div class="stat-val" id="statDocuments">—</div>
-            <div class="stat-note">Total files indexed</div>
-          </div>
-
-          <div class="stat">
-            <div class="stat-row1">
-              <span class="stat-label">Content Blocks</span>
-              <div class="stat-ico">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-              </div>
-            </div>
-            <div class="stat-val" id="statBlocks">—</div>
-            <div class="stat-note">Extracted text blocks</div>
-          </div>
-
-          <div class="stat">
-            <div class="stat-row1">
-              <span class="stat-label">Storage</span>
-              <div class="stat-ico">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-              </div>
-            </div>
-            <div class="stat-val" id="statStorage">—</div>
-            <div class="stat-note">Total indexed size</div>
-          </div>
+          <h1>Scan-Posteingang</h1>
+          <p>Gescannte Dokumente prüfen und in die richtige Ablage übernehmen.</p>
         </div>
 
         <div class="card">
           <div class="card-head">
             <div class="card-ico">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
             </div>
             <div class="card-titles">
-              <h2>Quick Access</h2>
-              <p>Navigate to key features</p>
+              <h2>Scan-Posteingang</h2>
+              <p>Gescannte Dokumente prüfen und in die richtige Ablage übernehmen.</p>
             </div>
           </div>
           <div class="card-body">
-            <div class="quick-grid">
-              <a href="/search" class="quick-card">
-                <div class="quick-card-ico">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                </div>
-                <div class="quick-card-title">Search</div>
-                <div class="quick-card-desc">Full-text search across all indexed documents with filters</div>
-              </a>
-              <a href="/ingest" class="quick-card">
-                <div class="quick-card-ico">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                </div>
-                <div class="quick-card-title">Ingest</div>
-                <div class="quick-card-desc">Upload files and trigger document indexing pipelines</div>
-              </a>
-              <a href="/config" class="quick-card">
-                <div class="quick-card-ico">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
-                </div>
-                <div class="quick-card-title">Config</div>
-                <div class="quick-card-desc">Manage crawler paths, extensions, and database settings</div>
-              </a>
+            <div class="f-grid">
+              <div class="f-col">
+                <label class="f-label" for="scanInboxSelect">Eingang</label>
+                <select id="scanInboxSelect"></select>
+              </div>
+              <div class="f-col">
+                <label class="f-label" for="scanStatusSelect">Status</label>
+                <select id="scanStatusSelect">
+                  <option value="pending">Offen</option>
+                  <option value="error">Fehler</option>
+                  <option value="">Alle</option>
+                </select>
+              </div>
+              <div class="f-col self-end">
+                <button id="scanRefreshBtn" class="btn" type="button">Aktualisieren</button>
+              </div>
             </div>
-          </div>
-        </div>
-
-        <!-- ── Recent searches ── -->
-        <div class="card gap-top">
-          <div class="card-head">
-            <div class="card-ico">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            </div>
-            <div class="card-titles">
-              <h2>Recent Searches</h2>
-              <p>Quickly revisit past queries</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div id="recentSearches"><p class="muted font-sm">No recent searches yet.</p></div>
+            <div id="scanReviewList" class="list" aria-live="polite"></div>
           </div>
         </div>
 

@@ -1291,6 +1291,10 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     def jobs_page(request: Request):
         return templates.TemplateResponse("jobs.html", {"request": request})
 
+    @app.get("/scan", response_class=HTMLResponse)
+    def scan_page(request: Request):
+        return templates.TemplateResponse("scan.html", {"request": request})
+
 
     @app.get("/api/config")
     def api_get_config(x_auth_token: str | None = Header(default=None)):
