@@ -62,6 +62,21 @@ INDEX_DOCS_TOTAL = Counter(
     registry=REGISTRY,
 )
 
+# Scanned documents ingested, labelled by inbox and outcome (pending|error).
+SCAN_INGESTED_TOTAL = Counter(
+    "seekr_scan_ingested_total",
+    "Scanned documents processed by the scan-inbox ingester.",
+    ["inbox", "outcome"],
+    registry=REGISTRY,
+)
+
+# Current number of scan reviews awaiting human action (refreshed at scrape time).
+SCAN_REVIEW_PENDING = Gauge(
+    "seekr_scan_review_pending",
+    "Scan reviews currently in the pending state.",
+    registry=REGISTRY,
+)
+
 # Every queue state we want a gauge series for, so absent states report 0
 # rather than vanishing from the exposition.
 _QUEUE_STATES = ("pending", "running", "succeeded", "failed", "interrupted")
