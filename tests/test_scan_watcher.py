@@ -75,3 +75,9 @@ def test_scan_once_ignores_unsupported_extension(tmp_path):
                       now=src.stat().st_mtime + 400)
     assert moved == 0
     assert src.exists()
+
+
+def test_scan_once_missing_inbox_returns_zero(tmp_path):
+    ib = ScanInbox(id="x", label="X", inbox_path=str(tmp_path / "nonexistent"),
+                   target_root=str(tmp_path / "out"), stability_seconds=300)
+    assert scan_once(ib, data_dir=tmp_path / "data", enqueue=lambda *a: None) == 0

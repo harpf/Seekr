@@ -19,6 +19,7 @@ SCAN_SUFFIXES = (".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff")
 
 
 def staging_dir_for(data_dir: Path, inbox_id: str) -> Path:
+    """Canonical staging path: <data_dir>/scan-staging/<inbox_id>/pending-review."""
     return Path(data_dir) / "scan-staging" / inbox_id / "pending-review"
 
 
@@ -33,7 +34,8 @@ def is_stable(path: Path, *, stability_seconds: int, now: float | None = None) -
 
 
 def _claim_destination(staging: Path, name: str) -> Path:
-    """A non-colliding destination path inside staging."""
+    """Non-colliding destination in staging. Safe for the single-process polling loop;
+    a uuid suffix avoids overwriting a pre-existing staged file."""
     dest = staging / name
     if not dest.exists():
         return dest
@@ -73,5 +75,5 @@ def scan_once(
             enqueue(inbox.id, str(dest), entry.name)
         except Exception:
             log.exception("Failed to enqueue scan_ingest for %s", dest)
-        claimed += 1
+        claimed += 1  # intentional: file was already moved; D2 recovery re-enqueues orphaned staging files
     return claimed
