@@ -808,6 +808,125 @@ class SqliteStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    # ── Scan ACL helpers ───────────────────────────────────────────────
+
+    def principal_id_for(self, *, group_external_id: str | None = None,
+                         user_external_id: str | None = None) -> int | None:
+        """Resolve a principal id by group external_id or by username. Creates a
+        'user'-type principal on demand for a known username (mirrors backfill)."""
+        if group_external_id:
+            row = self.conn.execute(
+                "SELECT id FROM principals WHERE type='group' AND external_id=?",
+                (group_external_id,),
+            ).fetchone()
+            return row["id"] if row else None
+        if user_external_id:
+            row = self.conn.execute(
+                "SELECT id FROM principals WHERE type='user' AND external_id=?",
+                (user_external_id,),
+            ).fetchone()
+            if row:
+                return row["id"]
+            u = self.conn.execute(
+                "SELECT id FROM users WHERE username=?", (user_external_id,)
+            ).fetchone()
+            if u is None:
+                return None
+            now = datetime.now(tz=UTC).isoformat()
+            self.conn.execute(
+                "INSERT OR IGNORE INTO principals(type, external_id, display_name, created_at) "
+                "VALUES('user', ?, ?, ?)",
+                (user_external_id, user_external_id, now),
+            )
+            self.conn.execute(
+                "UPDATE users SET principal_id=(SELECT id FROM principals "
+                "WHERE type='user' AND external_id=?) WHERE id=? AND principal_id IS NULL",
+                (user_external_id, u["id"]),
+            )
+            self.conn.commit()
+            p = self.conn.execute(
+                "SELECT id FROM principals WHERE type='user' AND external_id=?",
+                (user_external_id,),
+            ).fetchone()
+            return p["id"] if p else None
+        return None
+
+    def _public_principal_id(self) -> int | None:
+        row = self.conn.execute(
+            "SELECT id FROM principals WHERE type='group' AND external_id='public'"
+        ).fetchone()
+        return row["id"] if row else None
+
+    def set_scan_acl(self, document_id: int, *, group_external_ids: list[str],
+                     user_external_ids: list[str]) -> None:
+        """Make a scanned doc private to reviewers: drop public-read, grant read to
+        the configured reviewer groups + users. Explicit grants only — never rely on
+        absence of ACL rows (the backfill re-publicises empty docs). If NO reviewers
+        are given, a non-public sentinel row is still left so the doc is never
+        ACL-empty (otherwise _backfill_acl would re-grant public read)."""
+        public_id = self._public_principal_id()
+        if public_id is not None:
+            self.conn.execute(
+                "DELETE FROM document_acl WHERE document_id=? AND principal_id=? AND permission='read'",
+                (document_id, public_id),
+            )
+        now = datetime.now(tz=UTC).isoformat()
+        granted_any = False
+        for gid in group_external_ids:
+            pid = self.principal_id_for(group_external_id=gid)
+            if pid is not None:
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO document_acl(document_id, principal_id, permission, granted_at) "
+                    "VALUES(?,?, 'read', ?)", (document_id, pid, now))
+                granted_any = True
+        for uid in user_external_ids:
+            pid = self.principal_id_for(user_external_id=uid)
+            if pid is not None:
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO document_acl(document_id, principal_id, permission, granted_at) "
+                    "VALUES(?,?, 'read', ?)", (document_id, pid, now))
+                granted_any = True
+        if not granted_any:
+            # No reviewers resolved: leave an explicit owner/admin-only sentinel so
+            # the row count is never zero. Grant read to a dedicated 'scan-admins'
+            # group (created on demand) so the doc stays non-public but never empty.
+            sentinel = self.conn.execute(
+                "SELECT id FROM principals WHERE type='group' AND external_id='scan-admins'"
+            ).fetchone()
+            if sentinel is None:
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO principals(type, external_id, display_name, created_at) "
+                    "VALUES('group', 'scan-admins', 'Scan Admins', ?)", (now,))
+                sentinel = self.conn.execute(
+                    "SELECT id FROM principals WHERE type='group' AND external_id='scan-admins'"
+                ).fetchone()
+            self.conn.execute(
+                "INSERT OR IGNORE INTO document_acl(document_id, principal_id, permission, granted_at) "
+                "VALUES(?,?, 'read', ?)", (document_id, sentinel["id"], now))
+        self.conn.commit()
+
+    def restore_public_read(self, document_id: int) -> None:
+        """Re-grant public read (used when a scan is filed so it behaves like a
+        normally indexed document)."""
+        public_id = self._public_principal_id()
+        if public_id is None:
+            return
+        now = datetime.now(tz=UTC).isoformat()
+        self.conn.execute(
+            "INSERT OR IGNORE INTO document_acl(document_id, principal_id, permission, granted_at) "
+            "VALUES(?,?, 'read', ?)", (document_id, public_id, now))
+        self.conn.commit()
+
+    def user_group_external_ids(self, user_id: int) -> set[str]:
+        """The external_ids of every group the user belongs to (for inbox auth)."""
+        rows = self.conn.execute(
+            "SELECT p.external_id FROM user_groups ug "
+            "JOIN principals p ON p.id = ug.principal_id "
+            "WHERE ug.user_id = ? AND p.type='group'",
+            (user_id,),
+        ).fetchall()
+        return {r["external_id"] for r in rows}
+
     def get_document(self, path: str):
         return self.conn.execute("SELECT * FROM documents WHERE path = ?", (path,)).fetchone()
 

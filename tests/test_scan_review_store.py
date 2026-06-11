@@ -1,6 +1,48 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 from document_search.index.sqlite_store import SqliteStore
+from document_search.models import ContentBlock, ExtractionResult, FileFingerprint
+from document_search.services.acl_service import visible_document_ids_subquery
+
+
+def _make_doc(db, tmp_path, name="d.pdf"):
+    p = tmp_path / name
+    p.write_text("x")
+    fp = FileFingerprint(path=p, file_size=1, modified_at=datetime.now(tz=UTC), sha256="h" + name)
+    ext = ExtractionResult(file_path=p, status="ok",
+                           blocks=[ContentBlock("page", 1, "hello", "T", {})])
+    return db.upsert_document(fp, ext)
+
+
+def _visible_to(db, user_id, doc_id):
+    sql, params = visible_document_ids_subquery(user_id)
+    rows = db.conn.execute(f"SELECT 1 FROM ({sql}) WHERE document_id = ?",
+                           list(params) + [doc_id]).fetchall()
+    return bool(rows)
+
+
+def test_set_scan_acl_revokes_public_and_grants_reviewers(tmp_path):
+    db = SqliteStore(Path(tmp_path / "t.db"))
+    reviewer = db.create_user("reviewer", "pw12345678", role="user")
+    other = db.create_user("other", "pw12345678", role="user")
+    doc_id = _make_doc(db, tmp_path)
+    assert _visible_to(db, other, doc_id)  # public initially
+
+    db.set_scan_acl(doc_id, group_external_ids=[], user_external_ids=["reviewer"])
+
+    assert _visible_to(db, reviewer, doc_id)
+    assert not _visible_to(db, other, doc_id)
+
+
+def test_restore_public_read_makes_doc_visible_again(tmp_path):
+    db = SqliteStore(Path(tmp_path / "t.db"))
+    other = db.create_user("other", "pw12345678", role="user")
+    doc_id = _make_doc(db, tmp_path)
+    db.set_scan_acl(doc_id, group_external_ids=[], user_external_ids=[])
+    assert not _visible_to(db, other, doc_id)
+    db.restore_public_read(doc_id)
+    assert _visible_to(db, other, doc_id)
 
 
 def test_scan_review_table_and_index_exist(tmp_path):
