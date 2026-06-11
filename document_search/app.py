@@ -829,6 +829,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     @worker.handler("scan_ingest")
     def _handle_scan_ingest(payload: dict, progress_cb):
         from document_search.services.scan_extractor import extract_for_scan
+        from document_search.services.scan_inbox_config import parse_scan_inboxes
         from document_search.services.scan_review_store import ScanReviewStore
 
         inbox_id = payload["inbox_id"]
@@ -837,7 +838,12 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         db = SqliteStore(Path(db_path))
         srs = ScanReviewStore(db)
 
-        inbox = _inbox_by_id(inbox_id)
+        # Single config read — avoids TOCTOU between inbox lookup and OCR settings.
+        cfg = load_config(config_path) if config_path.exists() else AppConfig()
+        inbox = next(
+            (ib for ib in parse_scan_inboxes(cfg.scan_inboxes) if ib.id == inbox_id),
+            None,
+        )
         if inbox is None:
             srs.create_error(inbox_id=inbox_id, staging_path=staging_path,
                              original_filename=original_filename,
@@ -845,7 +851,6 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             _obs.SCAN_INGESTED_TOTAL.labels(inbox=inbox_id, outcome="error").inc()
             return {"status": "error", "reason": "unknown_inbox"}
 
-        cfg = load_config(config_path) if config_path.exists() else AppConfig()
         languages = "+".join(cfg.ocr.languages) if cfg.ocr.languages else "deu+eng"
         result = extract_for_scan(Path(staging_path), languages=languages)
         if result.status == "error":
@@ -871,8 +876,12 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                 metadata={"candidate_folders": ", ".join(candidates),
                           "filename": original_filename},
             )
-            if sug.suggested_subpath and sug.suggested_subpath in candidates:
-                suggested_folder = sug.suggested_subpath
+            sub = (sug.suggested_subpath or "").strip()
+            # Match case-insensitively against real subfolder names; store the REAL
+            # name (the LLM output is lowercased by _safe_subpath). Multi-segment
+            # paths won't match the flat candidate list and are (correctly) rejected.
+            match = next((c for c in candidates if c.lower() == sub.lower()), None) if sub else None
+            suggested_folder = match
             suggested_tags = sug.suggested_tags or []
             reason = sug.reason
         except Exception:
