@@ -40,6 +40,7 @@ class AppConfig:
     bm25_weight: float = 1.0
     vector_weight: float = 1.0
     ocr: OcrConfig = field(default_factory=OcrConfig)
+    scan_inboxes: list[dict] = field(default_factory=list)
 
 
 def load_config(path: Path | None) -> AppConfig:

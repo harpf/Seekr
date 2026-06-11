@@ -68,3 +68,26 @@ def test_validate_inbox_paths_rejects_missing(tmp_path):
                    target_root=str(tmp_path))
     with pytest.raises(ScanInboxConfigError, match="does not exist"):
         validate_inbox_paths(ib)
+
+
+import json
+
+from document_search.config import load_config
+
+
+def test_load_config_reads_scan_inboxes(tmp_path):
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(json.dumps({
+        "scan_inboxes": [
+            {"id": "b", "label": "B", "inbox_path": "/in", "target_root": "/out"}
+        ]
+    }), encoding="utf-8")
+    cfg = load_config(cfg_file)
+    assert isinstance(cfg.scan_inboxes, list)
+    assert cfg.scan_inboxes[0]["id"] == "b"
+
+
+def test_load_config_defaults_scan_inboxes_empty(tmp_path):
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text("{}", encoding="utf-8")
+    assert load_config(cfg_file).scan_inboxes == []
