@@ -2,6 +2,7 @@ from pathlib import Path
 
 from document_search.services.scan_inbox_config import ScanInbox
 from document_search.services.scan_watcher import (
+    ScanWatcherManager,
     is_stable,
     scan_once,
     staging_dir_for,
@@ -81,3 +82,46 @@ def test_scan_once_missing_inbox_returns_zero(tmp_path):
     ib = ScanInbox(id="x", label="X", inbox_path=str(tmp_path / "nonexistent"),
                    target_root=str(tmp_path / "out"), stability_seconds=300)
     assert scan_once(ib, data_dir=tmp_path / "data", enqueue=lambda *a: None) == 0
+
+
+def test_manager_reconfigure_tracks_enabled_inboxes(tmp_path):
+    enq = []
+    mgr = ScanWatcherManager(
+        data_dir=tmp_path / "data",
+        enqueue=lambda i, s, o: enq.append((i, s, o)),
+    )
+    ib_on = ScanInbox(id="on", label="On", inbox_path=str(tmp_path),
+                      target_root=str(tmp_path / "t1"), enabled=True)
+    ib_off = ScanInbox(id="off", label="Off", inbox_path=str(tmp_path),
+                       target_root=str(tmp_path / "t2"), enabled=False)
+    mgr.reconfigure([ib_on, ib_off])
+    assert mgr.active_inbox_ids() == {"on"}
+    mgr.reconfigure([])
+    assert mgr.active_inbox_ids() == set()
+    mgr.stop_all()
+
+
+def test_manager_recover_reenqueues_orphan_staging_files(tmp_path):
+    data = tmp_path / "data"
+    staging = staging_dir_for(data, "b")
+    staging.mkdir(parents=True)
+    orphan = staging / "left.pdf"
+    orphan.write_bytes(b"x")
+    enq = []
+    mgr = ScanWatcherManager(data_dir=data, enqueue=lambda i, s, o: enq.append((i, s, o)))
+    ib = ScanInbox(id="b", label="B", inbox_path=str(tmp_path), target_root=str(tmp_path / "t"))
+    mgr.recover_orphans([ib], known_staging_paths=set())
+    assert enq == [("b", str(orphan), "left.pdf")]
+
+
+def test_manager_recover_skips_files_with_existing_rows(tmp_path):
+    data = tmp_path / "data"
+    staging = staging_dir_for(data, "b")
+    staging.mkdir(parents=True)
+    tracked = staging / "tracked.pdf"
+    tracked.write_bytes(b"x")
+    enq = []
+    mgr = ScanWatcherManager(data_dir=data, enqueue=lambda i, s, o: enq.append((i, s, o)))
+    ib = ScanInbox(id="b", label="B", inbox_path=str(tmp_path), target_root=str(tmp_path / "t"))
+    mgr.recover_orphans([ib], known_staging_paths={str(tracked)})
+    assert enq == []

@@ -20,6 +20,9 @@ starlette==0.50.0
 cryptography>=42.0.0,<46.0
 psutil>=5.9.0
 prometheus-client>=0.20.0
+# Optional low-latency file-system event accelerator for scan inboxes.
+# Import is guarded — absence degrades to polling-only without crashing.
+watchdog>=4.0.0
 
 # Optional: enable the Redis backend for sessions + rate limiting in
 # multi-replica deployments. Activate with DOCUMENT_SEARCH_STATE_BACKEND=redis.
