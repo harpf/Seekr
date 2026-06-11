@@ -489,7 +489,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     # Use os.path string ops (not Path()) so create_app stays robust when tests
     # monkeypatch os.name to "posix" — pathlib selects the path flavour from
     # os.name and would raise NotImplementedError on Windows.
-    _data_dir_str: str = os.path.dirname(os.path.abspath(db_path)) or "."
+    _data_dir_str: str = os.path.dirname(os.path.abspath(db_path))
 
     def _enqueue_scan_ingest(inbox_id: str, staging_path: str, original_filename: str) -> None:
         job_store.enqueue("scan_ingest", {
@@ -544,7 +544,10 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             inboxes = _current_scan_inboxes()
             from document_search.services.scan_review_store import ScanReviewStore
             _recovery_db = SqliteStore(Path(db_path))
-            known = ScanReviewStore(_recovery_db).staging_paths_with_rows()
+            try:
+                known = ScanReviewStore(_recovery_db).staging_paths_with_rows()
+            finally:
+                _recovery_db.conn.close()
             scan_watcher_manager.recover_orphans(inboxes, known_staging_paths=known)
             scan_watcher_manager.reconfigure(inboxes)
         except Exception:
