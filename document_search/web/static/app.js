@@ -3153,3 +3153,92 @@ function _pvRenderMarkdown(src) {
     .replace(/\n{2,}/g, '<br><br>')
     .replace(/\n/g, '<br>');
 }
+
+// ── Scan inbox review ──────────────────────────────────────────────
+(function scanReviewModule() {
+  const listEl = document.getElementById('scanReviewList');
+  if (!listEl) return; // only on /scan
+  const inboxSel = document.getElementById('scanInboxSelect');
+  const statusSel = document.getElementById('scanStatusSelect');
+  const refreshBtn = document.getElementById('scanRefreshBtn');
+
+  async function loadInboxes() {
+    const inboxes = await api('/api/scan/inboxes');
+    inboxSel.innerHTML = inboxes.map(i =>
+      `<option value="${escHtml(i.id)}">${escHtml(i.label)}</option>`).join('');
+  }
+
+  function reviewCard(item) {
+    const tags = (item.suggested_tags || []).map(t => `<span class="chip">${escHtml(t)}</span>`).join('');
+    const suggestion = item.suggested_folder
+      ? `Vorschlag: <strong>${escHtml(item.suggested_folder)}</strong>`
+      : '<em>kein KI-Vorschlag</em>';
+    const actions = item.status === 'error'
+      ? `<div class="error-text">${escHtml(item.error_message || 'Fehler')}</div>
+         <button data-retry="${item.id}" class="btn" type="button">Erneut versuchen</button>`
+      : `<label>Zielordner <select data-folder="${item.id}"></select></label>
+         <label>Tags <input data-tags="${item.id}" value="${escHtml((item.suggested_tags||[]).join(', '))}"></label>
+         <button data-confirm="${item.id}" class="btn btn-primary" type="button">Bestätigen</button>
+         <button data-reject="${item.id}" class="btn btn-danger" type="button">Ablehnen</button>`;
+    return `<article class="review-row" data-row="${item.id}">
+        <div class="review-meta"><strong>${escHtml(item.original_filename)}</strong>
+          <span class="muted">${escHtml(item.created_at || '')}</span></div>
+        <div class="review-suggestion">${suggestion} ${tags}</div>
+        ${item.ai_reasoning ? `<div class="muted">${escHtml(item.ai_reasoning)}</div>` : ''}
+        <div class="review-actions">${actions}</div>
+      </article>`;
+  }
+
+  async function fillFolders(reviewId, selectEl, preselect) {
+    const folders = await api(`/api/scan/review/${reviewId}/folders`);
+    selectEl.innerHTML = folders.map(f =>
+      `<option value="${escHtml(f)}"${f === preselect ? ' selected' : ''}>${escHtml(f)}</option>`).join('');
+  }
+
+  async function refresh() {
+    const inbox = inboxSel.value;
+    const status = statusSel.value;
+    if (!inbox) { listEl.innerHTML = '<div class="empty">Kein Eingang konfiguriert.</div>'; return; }
+    let items;
+    try {
+      items = await api(`/api/scan/review?inbox=${encodeURIComponent(inbox)}&status=${encodeURIComponent(status)}`);
+    } catch (e) { showToast(String(e.message || e), 'err'); return; }
+    if (!items.length) { listEl.innerHTML = '<div class="empty">Nichts zu prüfen.</div>'; return; }
+    listEl.innerHTML = items.map(reviewCard).join('');
+    for (const item of items) {
+      if (item.status !== 'error') {
+        const sel = listEl.querySelector(`select[data-folder="${item.id}"]`);
+        if (sel) { try { await fillFolders(item.id, sel, item.suggested_folder); } catch (e) { /* leave empty */ } }
+      }
+    }
+  }
+
+  listEl.addEventListener('click', async (ev) => {
+    const t = ev.target;
+    const id = t.getAttribute && (t.getAttribute('data-confirm') || t.getAttribute('data-reject') || t.getAttribute('data-retry'));
+    if (!id) return;
+    try {
+      if (t.hasAttribute('data-confirm')) {
+        const folderSel = listEl.querySelector(`select[data-folder="${id}"]`);
+        const folder = folderSel ? folderSel.value : '';
+        const tags = (listEl.querySelector(`input[data-tags="${id}"]`).value || '')
+          .split(',').map(s => s.trim()).filter(Boolean);
+        if (!folder) { showToast('Kein Zielordner', 'err'); return; }
+        await api(`/api/scan/review/${id}/confirm`, 'POST', { folder, tags });
+        showToast('Abgelegt', 'ok');
+      } else if (t.hasAttribute('data-reject')) {
+        await api(`/api/scan/review/${id}/reject`, 'POST');
+        showToast('Abgelehnt', 'ok');
+      } else {
+        await api(`/api/scan/review/${id}/retry`, 'POST');
+        showToast('Erneut eingereiht', 'ok');
+      }
+      await refresh();
+    } catch (e) { showToast(String(e.message || e), 'err'); }
+  });
+
+  refreshBtn.addEventListener('click', refresh);
+  inboxSel.addEventListener('change', refresh);
+  statusSel.addEventListener('change', refresh);
+  (async () => { try { await loadInboxes(); await refresh(); } catch (e) { /* not signed in / no inboxes */ } })();
+})();
