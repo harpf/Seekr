@@ -84,6 +84,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
             Home Assist.
           </button>
+          <button class="tab admin-only hidden" onclick="switchTab('scan-inboxes')" data-tab="scan-inboxes">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+            Scan-Eingänge
+          </button>
           <button class="tab admin-only hidden" onclick="switchTab('audit')" data-tab="audit">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="9" y1="9" x2="10" y2="9"/></svg>
             Audit
@@ -794,6 +798,103 @@
           </div>
 
         </div><!-- /tab-ha -->
+
+        <!-- ─── Tab: Scan-Eingänge ─── -->
+        <div id="tab-scan-inboxes" class="tab-panel hidden admin-only">
+
+          <!-- Inbox list -->
+          <div id="scanInboxConfig" class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg></div>
+              <div class="card-titles"><h2>Scan-Eingänge</h2><p>Überwachte Ordner für automatischen Scan-Eingang</p></div>
+            </div>
+            <div class="card-body">
+              <div id="scanInboxList" class="path-list"></div>
+              <p id="scanInboxListResult" class="feedback"></p>
+            </div>
+          </div>
+
+          <!-- Add / edit inbox form -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
+              <div class="card-titles"><h2 id="scanInboxFormTitle">Eingang hinzufügen</h2><p>Neuen Scan-Eingang konfigurieren</p></div>
+            </div>
+            <div class="card-body">
+              <input type="hidden" id="scanInboxEditId" />
+              <div class="f-grid">
+                <div class="f-col">
+                  <label class="f-label" for="scanInboxLabel">Label</label>
+                  <input id="scanInboxLabel" placeholder="Rechnungen" />
+                  <span class="f-hint">Anzeigename des Eingangs</span>
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="scanInboxPath">Eingangsordner (inbox_path)</label>
+                  <input id="scanInboxPath" placeholder="/scan/eingang" />
+                  <span class="f-hint">Ordner, der auf neue Dateien überwacht wird</span>
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="scanInboxTarget">Ziel-Wurzel (target_root)</label>
+                  <input id="scanInboxTarget" placeholder="/dokumente/abgelegt" />
+                  <span class="f-hint">Wurzelordner für abgelegte Dokumente</span>
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="scanInboxGroups">Zuständige Gruppen</label>
+                  <select id="scanInboxGroups" multiple size="4" style="min-height:5rem;"></select>
+                  <span class="f-hint">Strg/Cmd + Klick für Mehrfachauswahl</span>
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="scanInboxUsers">Zuständige Benutzer</label>
+                  <select id="scanInboxUsers" multiple size="4" style="min-height:5rem;"></select>
+                  <span class="f-hint">Strg/Cmd + Klick für Mehrfachauswahl</span>
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="scanInboxStability">Stabilität (s)</label>
+                  <input id="scanInboxStability" type="number" min="0" value="300" />
+                  <span class="f-hint">Wartezeit bis Datei als stabil gilt (Sekunden)</span>
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="scanInboxPoll">Poll-Intervall (s)</label>
+                  <input id="scanInboxPoll" type="number" min="5" value="60" />
+                  <span class="f-hint">Abfrageintervall des Eingangsordners (Sekunden)</span>
+                </div>
+                <div class="f-col">
+                  <label class="f-label" for="scanInboxEnabled"><input id="scanInboxEnabled" type="checkbox" checked /> Aktiv</label>
+                  <span class="f-hint">Eingang aktivieren</span>
+                </div>
+              </div>
+              <div id="scanInboxTestInline" class="hidden gap-top">
+                <span id="scanInboxTestMsg" class="feedback"></span>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-p" onclick="scanInboxConfigModule.submitForm()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  <span id="scanInboxSubmitLabel">Eingang hinzufügen</span>
+                </button>
+                <button class="btn btn-g" onclick="scanInboxConfigModule.testForm()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                  Testen
+                </button>
+                <button class="btn btn-g" id="scanInboxCancelEdit" style="display:none;" onclick="scanInboxConfigModule.cancelEdit()">Abbrechen</button>
+              </div>
+              <p id="scanInboxFormResult" class="feedback"></p>
+            </div>
+          </div>
+
+          <!-- Save -->
+          <div class="card">
+            <div class="card-body">
+              <div class="btn-row">
+                <button class="btn btn-p" onclick="scanInboxConfigModule.save()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
+                  Scan-Eingänge speichern
+                </button>
+              </div>
+              <p id="scanInboxSaveResult" class="feedback"></p>
+            </div>
+          </div>
+
+        </div><!-- /tab-scan-inboxes -->
 
         <!-- ─── Tab: Audit ─── -->
         <div id="tab-audit" class="tab-panel hidden admin-only">

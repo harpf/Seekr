@@ -1269,6 +1269,8 @@ async function loadConfig() {
     if (document.getElementById('cfgOcrDpi')) cfgOcrDpi.value = ocr.dpi ?? 200;
     _sourcePaths = Array.isArray(c.source_paths) ? c.source_paths : [];
     renderPathList(_sourcePaths);
+    _scanInboxes = Array.isArray(c.scan_inboxes) ? c.scan_inboxes : [];
+    scanInboxConfigModule.renderList();
   } catch (e) {
     if (document.getElementById('configResult')) setText('configResult', e.message, 'err');
   }
@@ -1289,6 +1291,7 @@ async function saveConfig() {
         force_ocr: !!(document.getElementById('cfgOcrForce') && cfgOcrForce.checked),
         dpi: Number(cfgOcrDpi?.value || 200),
       },
+      scan_inboxes: _scanInboxes,
     };
     await api('/api/config', 'POST', payload);
     showToast('Configuration saved', 'ok');
@@ -1313,6 +1316,7 @@ function switchTab(name) {
   if (name === 'ssl') loadSslStatus();
   if (name === 'ai') loadAiTabData();
   if (name === 'ha') loadHaKeys();
+  if (name === 'scan-inboxes') scanInboxConfigModule.onTabOpen();
   if (name === 'audit') { _auditOffset = 0; loadAudit(); }
   if (name === 'system') { loadDeps(); loadAiStatus(); }
 }
@@ -1323,6 +1327,9 @@ function showAdminUI() {
 
 // ── Paths ──────────────────────────────────────────────────────────
 let _sourcePaths = [];
+
+// ── Scan inboxes (in-memory state, populated by loadConfig) ─────────
+let _scanInboxes = [];
 
 function renderPathList(paths) {
   const el = document.getElementById('pathList');
@@ -3250,4 +3257,258 @@ function _pvRenderMarkdown(src) {
   inboxSel.addEventListener('change', refresh);
   statusSel.addEventListener('change', refresh);
   (async () => { try { await loadInboxes(); await refresh(); } catch (e) { /* not signed in / no inboxes */ } })();
+})();
+
+// ── Scan-Inbox Config Module ──────────────────────────────────────────
+// IIFE guarded by presence of #scanInboxConfig (config page only).
+// Manages the in-memory _scanInboxes array and wires the admin CRUD UI.
+const scanInboxConfigModule = (() => {
+  // No-op stub used on all pages that lack the config card.
+  const noop = () => {};
+  const noopAsync = async () => {};
+
+  if (!document.getElementById('scanInboxConfig')) {
+    return { renderList: noop, onTabOpen: noop, submitForm: noop, testForm: noopAsync, cancelEdit: noop, save: noopAsync };
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────
+
+  function _selValues(selectId) {
+    const el = document.getElementById(selectId);
+    if (!el) return [];
+    return Array.from(el.selectedOptions).map(o => o.value);
+  }
+
+  function _setSelValues(selectId, vals) {
+    const el = document.getElementById(selectId);
+    if (!el) return;
+    const set = new Set(vals || []);
+    for (const opt of el.options) opt.selected = set.has(opt.value);
+  }
+
+  function _reviewersLabel(reviewers) {
+    const r = reviewers || {};
+    const g = (r.groups || []).join(', ');
+    const u = (r.users || []).join(', ');
+    const parts = [];
+    if (g) parts.push('Gruppen: ' + g);
+    if (u) parts.push('Benutzer: ' + u);
+    return parts.join(' | ') || '—';
+  }
+
+  // ── Render inbox list ──────────────────────────────────────────────
+
+  function renderList() {
+    const el = document.getElementById('scanInboxList');
+    if (!el) return;
+    if (!_scanInboxes.length) {
+      el.innerHTML = '<p class="muted" style="font-size:.82rem;margin-bottom:.75rem;">Keine Scan-Eingänge konfiguriert.</p>';
+      return;
+    }
+    el.innerHTML = `<div class="u-table-wrap"><table class="u-table">
+      <thead><tr>
+        <th>Label</th><th>Eingangsordner</th><th>Ziel-Wurzel</th>
+        <th>Zuständige</th><th>Stabilität</th><th>Poll</th><th>Aktiv</th><th></th>
+      </tr></thead>
+      <tbody>${_scanInboxes.map((inbox, i) => `<tr>
+        <td>${escHtml(inbox.label || '—')}</td>
+        <td><code style="font-size:.8rem;">${escHtml(inbox.inbox_path || '—')}</code></td>
+        <td><code style="font-size:.8rem;">${escHtml(inbox.target_root || '—')}</code></td>
+        <td>${escHtml(_reviewersLabel(inbox.reviewers))}</td>
+        <td>${escHtml(String(inbox.stability_seconds ?? 300))} s</td>
+        <td>${escHtml(String(inbox.poll_interval_seconds ?? 60))} s</td>
+        <td><span class="badge ${inbox.enabled !== false ? 'badge-g' : 'badge-n'}">${inbox.enabled !== false ? 'Ja' : 'Nein'}</span></td>
+        <td>
+          <button class="btn btn-g btn-sm" onclick="scanInboxConfigModule._editRow(${i})">Bearbeiten</button>
+          <button class="btn btn-g btn-sm" onclick="scanInboxConfigModule._testRow(${i})" title="Verbindung testen">Testen</button>
+          <button class="btn btn-g btn-sm" style="color:var(--red)" onclick="scanInboxConfigModule._deleteRow(${i})">Entfernen</button>
+        </td>
+      </tr>`).join('')}
+      </tbody></table></div>`;
+  }
+
+  // ── Load groups + users for selects ───────────────────────────────
+
+  async function _loadReviewerOptions() {
+    try {
+      const [groups, users] = await Promise.all([api('/api/groups'), api('/api/users')]);
+      const gSel = document.getElementById('scanInboxGroups');
+      const uSel = document.getElementById('scanInboxUsers');
+      if (gSel) {
+        const saved = _selValues('scanInboxGroups');
+        gSel.innerHTML = (groups || []).map(g =>
+          `<option value="${escHtml(g.external_id || g.name)}">${escHtml(g.label || g.name || g.external_id)}</option>`
+        ).join('');
+        _setSelValues('scanInboxGroups', saved);
+      }
+      if (uSel) {
+        const saved = _selValues('scanInboxUsers');
+        uSel.innerHTML = (users || []).map(u =>
+          `<option value="${escHtml(u.username)}">${escHtml(u.username)}</option>`
+        ).join('');
+        _setSelValues('scanInboxUsers', saved);
+      }
+    } catch (e) {
+      showToast('Gruppen/Benutzer konnten nicht geladen werden: ' + e.message, 'err');
+    }
+  }
+
+  // ── Form helpers ───────────────────────────────────────────────────
+
+  function _clearForm() {
+    const fields = ['scanInboxEditId', 'scanInboxLabel', 'scanInboxPath', 'scanInboxTarget'];
+    fields.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    const stability = document.getElementById('scanInboxStability');
+    if (stability) stability.value = '300';
+    const poll = document.getElementById('scanInboxPoll');
+    if (poll) poll.value = '60';
+    const enabled = document.getElementById('scanInboxEnabled');
+    if (enabled) enabled.checked = true;
+    _setSelValues('scanInboxGroups', []);
+    _setSelValues('scanInboxUsers', []);
+    const title = document.getElementById('scanInboxFormTitle');
+    if (title) title.textContent = 'Eingang hinzufügen';
+    const lbl = document.getElementById('scanInboxSubmitLabel');
+    if (lbl) lbl.textContent = 'Eingang hinzufügen';
+    const cancelBtn = document.getElementById('scanInboxCancelEdit');
+    if (cancelBtn) cancelBtn.style.display = 'none';
+    const testInline = document.getElementById('scanInboxTestInline');
+    if (testInline) testInline.classList.add('hidden');
+    setText('scanInboxFormResult', '', '');
+  }
+
+  function _readForm() {
+    return {
+      id: document.getElementById('scanInboxEditId')?.value?.trim() || undefined,
+      label: document.getElementById('scanInboxLabel')?.value?.trim() || '',
+      inbox_path: document.getElementById('scanInboxPath')?.value?.trim() || '',
+      target_root: document.getElementById('scanInboxTarget')?.value?.trim() || '',
+      reviewers: {
+        groups: _selValues('scanInboxGroups'),
+        users: _selValues('scanInboxUsers'),
+      },
+      stability_seconds: Number(document.getElementById('scanInboxStability')?.value || 300),
+      poll_interval_seconds: Number(document.getElementById('scanInboxPoll')?.value || 60),
+      enabled: !!(document.getElementById('scanInboxEnabled')?.checked),
+    };
+  }
+
+  // ── Row actions ────────────────────────────────────────────────────
+
+  function _editRow(idx) {
+    const inbox = _scanInboxes[idx];
+    if (!inbox) return;
+    const editId = document.getElementById('scanInboxEditId');
+    if (editId) editId.value = inbox.id || '';
+    const lbl = document.getElementById('scanInboxLabel');
+    if (lbl) lbl.value = inbox.label || '';
+    const path = document.getElementById('scanInboxPath');
+    if (path) path.value = inbox.inbox_path || '';
+    const target = document.getElementById('scanInboxTarget');
+    if (target) target.value = inbox.target_root || '';
+    const stability = document.getElementById('scanInboxStability');
+    if (stability) stability.value = String(inbox.stability_seconds ?? 300);
+    const poll = document.getElementById('scanInboxPoll');
+    if (poll) poll.value = String(inbox.poll_interval_seconds ?? 60);
+    const enabled = document.getElementById('scanInboxEnabled');
+    if (enabled) enabled.checked = inbox.enabled !== false;
+    _setSelValues('scanInboxGroups', (inbox.reviewers || {}).groups || []);
+    _setSelValues('scanInboxUsers', (inbox.reviewers || {}).users || []);
+
+    const title = document.getElementById('scanInboxFormTitle');
+    if (title) title.textContent = 'Eingang bearbeiten';
+    const submitLbl = document.getElementById('scanInboxSubmitLabel');
+    if (submitLbl) submitLbl.textContent = 'Speichern';
+    const cancelBtn = document.getElementById('scanInboxCancelEdit');
+    if (cancelBtn) cancelBtn.style.display = '';
+    setText('scanInboxFormResult', '', '');
+
+    // Scroll to form
+    document.getElementById('scanInboxFormTitle')?.closest('.card')?.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  async function _testRow(idx) {
+    const inbox = _scanInboxes[idx];
+    if (!inbox) return;
+    try {
+      const r = await api('/api/scan/inboxes/test', 'POST', { inbox_path: inbox.inbox_path, target_root: inbox.target_root });
+      showToast(r.ok ? 'Test OK' : ('Fehler: ' + (r.error || 'Unbekannt')), r.ok ? 'ok' : 'err');
+    } catch (e) {
+      showToast('Test fehlgeschlagen: ' + e.message, 'err');
+    }
+  }
+
+  function _deleteRow(idx) {
+    _scanInboxes.splice(idx, 1);
+    renderList();
+    showToast('Eingang entfernt (noch nicht gespeichert)', 'info');
+  }
+
+  // ── Public API ─────────────────────────────────────────────────────
+
+  function submitForm() {
+    const row = _readForm();
+    if (!row.label) { showToast('Bitte Label eingeben', 'err'); return; }
+    if (!row.inbox_path) { showToast('Bitte Eingangsordner eingeben', 'err'); return; }
+    if (!row.target_root) { showToast('Bitte Ziel-Wurzel eingeben', 'err'); return; }
+    if (!row.id) delete row.id;  // new inbox — server derives id from label
+
+    const existingIdx = row.id
+      ? _scanInboxes.findIndex(ib => ib.id === row.id)
+      : _scanInboxes.findIndex(ib => ib.label === row.label);
+
+    if (existingIdx >= 0) {
+      _scanInboxes[existingIdx] = row;
+      showToast('Eingang aktualisiert (noch nicht gespeichert)', 'info');
+    } else {
+      _scanInboxes.push(row);
+      showToast('Eingang hinzugefügt (noch nicht gespeichert)', 'info');
+    }
+    renderList();
+    _clearForm();
+    setText('scanInboxFormResult', '', '');
+  }
+
+  async function testForm() {
+    const inbox_path = document.getElementById('scanInboxPath')?.value?.trim();
+    const target_root = document.getElementById('scanInboxTarget')?.value?.trim();
+    if (!inbox_path || !target_root) { showToast('Bitte Eingangsordner und Ziel-Wurzel angeben', 'err'); return; }
+    const testInline = document.getElementById('scanInboxTestInline');
+    const testMsg = document.getElementById('scanInboxTestMsg');
+    if (testInline) testInline.classList.remove('hidden');
+    if (testMsg) { testMsg.textContent = 'Teste…'; testMsg.className = 'feedback'; }
+    try {
+      const r = await api('/api/scan/inboxes/test', 'POST', { inbox_path, target_root });
+      if (testMsg) {
+        testMsg.textContent = r.ok ? 'Test erfolgreich' : ('Fehler: ' + escHtml(r.error || 'Unbekannt'));
+        testMsg.className = 'feedback ' + (r.ok ? 'ok' : 'err');
+      }
+    } catch (e) {
+      if (testMsg) { testMsg.textContent = 'Fehler: ' + e.message; testMsg.className = 'feedback err'; }
+    }
+  }
+
+  function cancelEdit() {
+    _clearForm();
+  }
+
+  async function save() {
+    try {
+      const current = await api('/api/config');
+      const payload = { ...current, scan_inboxes: _scanInboxes };
+      await api('/api/config', 'POST', payload);
+      showToast('Scan-Eingänge gespeichert', 'ok');
+      setText('scanInboxSaveResult', 'Gespeichert', 'ok');
+    } catch (e) {
+      showToast(e.message, 'err');
+      setText('scanInboxSaveResult', e.message, 'err');
+    }
+  }
+
+  async function onTabOpen() {
+    await _loadReviewerOptions();
+    renderList();
+  }
+
+  return { renderList, onTabOpen, submitForm, testForm, cancelEdit, save, _editRow, _testRow, _deleteRow };
 })();
