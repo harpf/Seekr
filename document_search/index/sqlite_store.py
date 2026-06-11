@@ -278,6 +278,25 @@ class SqliteStore:
             );
             CREATE INDEX IF NOT EXISTS idx_login_attempts_ip   ON login_attempts(ip, attempted_at);
             CREATE INDEX IF NOT EXISTS idx_login_attempts_time ON login_attempts(attempted_at);
+            CREATE TABLE IF NOT EXISTS scan_review (
+              id INTEGER PRIMARY KEY,
+              inbox_id TEXT NOT NULL,
+              document_id INTEGER,
+              staging_path TEXT NOT NULL,
+              original_filename TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'pending',
+              suggested_folder TEXT,
+              suggested_tags TEXT,
+              ai_reasoning TEXT,
+              ai_decision_id INTEGER,
+              error_message TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              reviewed_by TEXT,
+              reviewed_at TEXT,
+              FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE SET NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_scan_review_inbox_status ON scan_review(inbox_id, status);
             """
         )
         # Migration: add role column for existing databases
@@ -333,6 +352,7 @@ class SqliteStore:
         except Exception:
             pass
         self._migrate_jobs_cancellation()
+        self._migrate_scan_review()
         self._backfill_acl()
         self._backfill_content_hash()
 
@@ -418,6 +438,38 @@ class SqliteStore:
             raise
         finally:
             self.conn.execute("PRAGMA foreign_keys=ON")
+
+    def _migrate_scan_review(self) -> None:
+        """Create scan_review on legacy DBs. Table is additive (no ALTER), so the
+        index is created right after the table — never before an ALTER (see the
+        schema-migration-ordering convention)."""
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS scan_review (
+              id INTEGER PRIMARY KEY,
+              inbox_id TEXT NOT NULL,
+              document_id INTEGER,
+              staging_path TEXT NOT NULL,
+              original_filename TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'pending',
+              suggested_folder TEXT,
+              suggested_tags TEXT,
+              ai_reasoning TEXT,
+              ai_decision_id INTEGER,
+              error_message TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              reviewed_by TEXT,
+              reviewed_at TEXT,
+              FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE SET NULL
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_scan_review_inbox_status "
+            "ON scan_review(inbox_id, status)"
+        )
+        self.conn.commit()
 
     def _backfill_acl(self) -> None:
         """Idempotent backfill so existing data stays visible after ACL migration.
