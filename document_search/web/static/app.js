@@ -3177,6 +3177,7 @@ function _pvRenderMarkdown(src) {
       ? `<div class="error-text">${escHtml(item.error_message || 'Fehler')}</div>
          <button data-retry="${item.id}" class="btn" type="button">Erneut versuchen</button>`
       : `<label>Zielordner <select data-folder="${item.id}"></select></label>
+         <label>Neuer Ordner <input data-newfolder="${item.id}" type="text" placeholder="Neuer Ordner (optional)"></label>
          <label>Tags <input data-tags="${item.id}" value="${escHtml((item.suggested_tags||[]).join(', '))}"></label>
          <button data-confirm="${item.id}" class="btn btn-primary" type="button">Bestätigen</button>
          <button data-reject="${item.id}" class="btn btn-danger" type="button">Ablehnen</button>`;
@@ -3193,6 +3194,7 @@ function _pvRenderMarkdown(src) {
     const folders = await api(`/api/scan/review/${reviewId}/folders`);
     selectEl.innerHTML = folders.map(f =>
       `<option value="${escHtml(f)}"${f === preselect ? ' selected' : ''}>${escHtml(f)}</option>`).join('');
+    selectEl.insertAdjacentHTML('beforeend', '<option value="__new__">+ Neuer Ordner…</option>');
   }
 
   async function refresh() {
@@ -3220,11 +3222,18 @@ function _pvRenderMarkdown(src) {
     try {
       if (t.hasAttribute('data-confirm')) {
         const folderSel = listEl.querySelector(`select[data-folder="${id}"]`);
-        const folder = folderSel ? folderSel.value : '';
-        const tags = (listEl.querySelector(`input[data-tags="${id}"]`).value || '')
-          .split(',').map(s => s.trim()).filter(Boolean);
+        const newInput = listEl.querySelector(`input[data-newfolder="${id}"]`);
+        let folder, newFolder = false;
+        if (folderSel && folderSel.value === '__new__') {
+          folder = (newInput && newInput.value || '').trim();
+          newFolder = true;
+        } else {
+          folder = folderSel ? folderSel.value : '';
+        }
         if (!folder) { showToast('Kein Zielordner', 'err'); return; }
-        await api(`/api/scan/review/${id}/confirm`, 'POST', { folder, tags });
+        const tagsEl = listEl.querySelector(`input[data-tags="${id}"]`);
+        const tags = ((tagsEl && tagsEl.value) || '').split(',').map(s => s.trim()).filter(Boolean);
+        await api(`/api/scan/review/${id}/confirm`, 'POST', { folder, tags, new_folder: newFolder });
         showToast('Abgelegt', 'ok');
       } else if (t.hasAttribute('data-reject')) {
         await api(`/api/scan/review/${id}/reject`, 'POST');
