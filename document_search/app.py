@@ -189,6 +189,12 @@ class UiConfigRequest(BaseModel):
     ollama_url: str | None = None
     ollama_model: str | None = None
     ocr: OcrSettings = Field(default_factory=OcrSettings)
+    scan_inboxes: list[dict] = Field(default_factory=list)
+
+
+class ScanInboxTestRequest(BaseModel):
+    inbox_path: str
+    target_root: str
 
 
 class UserCreateRequest(BaseModel):
@@ -1307,7 +1313,20 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         admin_id = require_admin(x_auth_token)
         if req.ollama_url:
             _validate_ollama_url(req.ollama_url)
-        config_path.write_text(json.dumps(req.model_dump(), indent=2), encoding="utf-8")
+        from document_search.services.scan_inbox_config import (
+            ScanInboxConfigError,
+            parse_scan_inboxes,
+            validate_inbox_paths,
+        )
+        try:
+            parsed_inboxes = parse_scan_inboxes(req.scan_inboxes)
+            for ib in parsed_inboxes:
+                validate_inbox_paths(ib)
+        except ScanInboxConfigError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid scan inbox: {e}")
+        data = req.model_dump()
+        data["scan_inboxes"] = [ib.to_dict() for ib in parsed_inboxes]
+        config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         if req.ollama_url:
             organizer.base_url = req.ollama_url.rstrip("/")
         if req.ollama_model:
@@ -1318,6 +1337,10 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         os.environ["DOCUMENT_SEARCH_OCR_LANG"] = "+".join(req.ocr.languages) if req.ocr.languages else "deu+eng"
         os.environ["DOCUMENT_SEARCH_FORCE_OCR"] = "true" if req.ocr.force_ocr else "false"
         os.environ["DOCUMENT_SEARCH_OCR_DPI"] = str(req.ocr.dpi or 200)
+        try:
+            app.state.scan_watcher_manager.reconfigure(parsed_inboxes)
+        except Exception:
+            log.warning("Failed to reconfigure scan watchers after config save", exc_info=True)
         _audit(
             admin_id,
             "config.save",
@@ -2494,6 +2517,24 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         return {"status": "revoked"}
+
+    # ── Scan inbox path test ──────────────────────────────────────────
+
+    @app.post("/api/scan/inboxes/test")
+    def api_scan_inbox_test(req: ScanInboxTestRequest, x_auth_token: str | None = Header(default=None)):
+        require_admin(x_auth_token)
+        from document_search.services.scan_inbox_config import (
+            ScanInbox,
+            ScanInboxConfigError,
+            validate_inbox_paths,
+        )
+        ib = ScanInbox(id="_test", label="_test",
+                       inbox_path=req.inbox_path, target_root=req.target_root)
+        try:
+            validate_inbox_paths(ib)
+        except ScanInboxConfigError as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True}
 
     # ── Path test & network mount ──────────────────────────────────────
 
