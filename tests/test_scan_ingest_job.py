@@ -148,6 +148,35 @@ def test_scan_ingest_completes_when_ai_raises(tmp_path, monkeypatch):
     assert rows[0]["suggested_folder"] is None
 
 
+def test_metrics_exposes_scan_review_pending_gauge(tmp_path, monkeypatch):
+    """GET /metrics must reflect pending scan_review rows in seekr_scan_review_pending."""
+    app, db_path, data = _setup(tmp_path, monkeypatch, reviewers={"groups": [], "users": []})
+    staged = _stage_file(data, "b")
+    app.state.organizer.suggest = lambda **kw: __import__(
+        "document_search.services.ai_organizer", fromlist=["OrganizationSuggestion"]
+    ).OrganizationSuggestion(suggested_subpath=None, suggested_tags=[], reason="r", model="t")
+
+    _run_handler(app, "scan_ingest",
+                 {"inbox_id": "b", "staging_path": str(staged), "original_filename": "scan001.pdf"})
+
+    # Verify a pending row was created.
+    db = SqliteStore(db_path)
+    rows = ScanReviewStore(db).list_reviews(inbox_ids=["b"], status="pending")
+    assert len(rows) >= 1
+
+    # GET /metrics (no token required — DOCUMENT_SEARCH_METRICS_TOKEN unset in test env)
+    client = TestClient(app)
+    r = client.get("/metrics")
+    assert r.status_code == 200, r.text
+    text = r.text
+    # The gauge must appear in the exposition with a value >= 1.
+    assert "seekr_scan_review_pending" in text
+    import re
+    match = re.search(r"^seekr_scan_review_pending\s+(\d+)", text, re.MULTILINE)
+    assert match is not None, f"gauge line not found in:\n{text}"
+    assert int(match.group(1)) >= 1
+
+
 def test_watcher_manager_wired_on_app(tmp_path, monkeypatch):
     db_path = tmp_path / "document_index.db"
     config = tmp_path / "config.json"

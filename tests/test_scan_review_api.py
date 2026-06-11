@@ -127,6 +127,29 @@ def test_reject_removes_from_index(tmp_path, monkeypatch):
     assert ScanReviewStore(db).get(rid)["status"] == "rejected"
 
 
+def test_reject_already_filed_review_returns_409(tmp_path, monkeypatch):
+    """Rejecting a review that is already 'filed' must return 409."""
+    box = _inbox(tmp_path)
+    app, client, token, db_path = _client(tmp_path, monkeypatch, [box])
+    staging = tmp_path / "data" / "scan-staging" / "b" / "pending-review"
+    rid, _, _ = _seed_pending(db_path, staging)
+    # Confirm it first so it transitions to 'filed'.
+    r_confirm = client.post(f"/api/scan/review/{rid}/confirm", headers={"X-Auth-Token": token},
+                            json={"folder": "Rechnungen", "tags": []})
+    assert r_confirm.status_code == 200, r_confirm.text
+    # Now attempt to reject — must get 409 because the review is already filed.
+    r_reject = client.post(f"/api/scan/review/{rid}/reject", headers={"X-Auth-Token": token})
+    assert r_reject.status_code == 409
+
+
+def test_list_reviews_rejects_bogus_status(tmp_path, monkeypatch):
+    """GET /api/scan/review?status=<unknown> must return 400."""
+    box = _inbox(tmp_path)
+    app, client, token, db_path = _client(tmp_path, monkeypatch, [box])
+    r = client.get("/api/scan/review?inbox=b&status=bogus", headers={"X-Auth-Token": token})
+    assert r.status_code == 400
+
+
 def test_non_reviewer_cannot_access_inbox(tmp_path, monkeypatch):
     # inbox with a specific reviewer user; a different non-admin user is forbidden.
     box = _inbox(tmp_path)

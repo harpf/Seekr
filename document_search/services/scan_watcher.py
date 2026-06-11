@@ -25,7 +25,20 @@ def staging_dir_for(data_dir: Path, inbox_id: str) -> Path:
 
 
 def is_stable(path: Path, *, stability_seconds: int, now: float | None = None) -> bool:
-    """A file is stable when it has not been modified for `stability_seconds`."""
+    """Return True when the file's mtime is at least ``stability_seconds`` old.
+
+    Design choice — mtime-age based:
+      A file is considered stable once ``now - mtime >= stability_seconds``.
+      Because every write updates mtime, a mtime that is at least N seconds old
+      implies the file has not been written to in that window.  On filesystems
+      with normal mtime semantics this also implies the size is unchanged over
+      that window, so the check is a pragmatic equivalent of the "size AND mtime
+      unchanged for N seconds" intent expressed in the design.  On filesystems
+      with very coarse mtime granularity (e.g. FAT32 with 2-second resolution)
+      this is an approximation: a file written just before a coarse timestamp
+      boundary may appear stable one tick earlier than intended, but for the
+      scan-inbox use-case this is an acceptable trade-off.
+    """
     try:
         mtime = path.stat().st_mtime
     except OSError:

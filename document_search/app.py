@@ -2602,6 +2602,9 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
                              x_auth_token: str | None = Header(default=None)):
         from document_search.services.scan_review_store import ScanReviewStore
         user_id = require_user(x_auth_token)
+        _VALID_STATUSES = {"pending", "error", "filed", "rejected"}
+        if status and status not in _VALID_STATUSES:
+            raise HTTPException(status_code=400, detail="Invalid status")
         allowed = _authorized_inbox_ids(user_id)
         inbox_ids = [inbox] if inbox else allowed
         inbox_ids = [i for i in inbox_ids if i in allowed]
@@ -2683,6 +2686,8 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
         user_id = require_user(x_auth_token)
         row = _scan_review_or_404(review_id)
         _require_inbox_access(user_id, row["inbox_id"])
+        if row["status"] not in ("pending", "error"):
+            raise HTTPException(status_code=409, detail=f"Review is {row['status']}, cannot be rejected")
         db = store()
         if row["document_id"] is not None:
             db.delete_documents([row["document_id"]])
@@ -3405,6 +3410,12 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
             _obs.set_queue_depth(counts)
         except Exception:
             log.exception("failed to refresh queue-depth gauges for /metrics")
+        try:
+            from document_search.services.scan_review_store import ScanReviewStore
+            inbox_ids = [ib.id for ib in app.state.current_scan_inboxes()]
+            _obs.SCAN_REVIEW_PENDING.set(ScanReviewStore(store()).count_pending(inbox_ids))
+        except Exception:
+            log.warning("Failed to refresh SCAN_REVIEW_PENDING gauge", exc_info=True)
         body, content_type = _obs.render_metrics()
         return Response(content=body, media_type=content_type)
 
