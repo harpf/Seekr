@@ -1,5 +1,8 @@
+import json
+
 import pytest
 
+from document_search.config import load_config
 from document_search.services.scan_inbox_config import (
     ScanInbox,
     ScanInboxConfigError,
@@ -23,7 +26,8 @@ def test_parse_fills_defaults_and_derives_id():
     assert ib.stability_seconds == 300
     assert ib.poll_interval_seconds == 60
     assert ib.enabled is True
-    assert ib.reviewers_groups == [] and ib.reviewers_users == []
+    assert ib.reviewers_groups == []
+    assert ib.reviewers_users == []
 
 
 def test_parse_preserves_explicit_id_and_reviewers():
@@ -54,10 +58,31 @@ def test_stability_below_minimum_rejected():
         parse_scan_inboxes(raw)
 
 
+def test_poll_below_minimum_rejected():
+    raw = [{"label": "A", "inbox_path": "/a", "target_root": "/x", "poll_interval_seconds": 2}]
+    with pytest.raises(ScanInboxConfigError, match="poll_interval_seconds"):
+        parse_scan_inboxes(raw)
+
+
+def test_non_numeric_stability_rejected():
+    raw = [{"label": "A", "inbox_path": "/a", "target_root": "/x", "stability_seconds": "fast"}]
+    with pytest.raises(ScanInboxConfigError, match="integer"):
+        parse_scan_inboxes(raw)
+
+
 def test_validate_inbox_paths_rejects_inbox_inside_target(tmp_path):
     target = tmp_path / "docs"
     inbox = target / "incoming"
     inbox.mkdir(parents=True)
+    ib = ScanInbox(id="x", label="X", inbox_path=str(inbox), target_root=str(target))
+    with pytest.raises(ScanInboxConfigError, match="inside"):
+        validate_inbox_paths(ib)
+
+
+def test_validate_inbox_paths_rejects_target_inside_inbox(tmp_path):
+    inbox = tmp_path / "incoming"
+    target = inbox / "docs"
+    target.mkdir(parents=True)
     ib = ScanInbox(id="x", label="X", inbox_path=str(inbox), target_root=str(target))
     with pytest.raises(ScanInboxConfigError, match="inside"):
         validate_inbox_paths(ib)
@@ -68,11 +93,6 @@ def test_validate_inbox_paths_rejects_missing(tmp_path):
                    target_root=str(tmp_path))
     with pytest.raises(ScanInboxConfigError, match="does not exist"):
         validate_inbox_paths(ib)
-
-
-import json
-
-from document_search.config import load_config
 
 
 def test_load_config_reads_scan_inboxes(tmp_path):

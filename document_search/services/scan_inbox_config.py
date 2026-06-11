@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 _MIN_STABILITY_SECONDS = 30
+_MIN_POLL_SECONDS = 5
 
 
 class ScanInboxConfigError(ValueError):
@@ -43,7 +44,7 @@ def slugify_id(label: str) -> str:
     return s.strip("-")
 
 
-def _as_str_list(value) -> list[str]:
+def _as_str_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(v).strip() for v in value if str(v).strip()]
@@ -81,14 +82,24 @@ def parse_scan_inboxes(raw: object) -> list[ScanInbox]:
         seen_ids.add(ib_id)
 
         reviewers = entry.get("reviewers") or {}
-        stability = int(entry.get("stability_seconds", 300))
+        try:
+            stability = int(entry.get("stability_seconds", 300))
+        except (ValueError, TypeError):
+            raise ScanInboxConfigError(
+                f"inbox '{label}': stability_seconds must be an integer"
+            ) from None
         if stability < _MIN_STABILITY_SECONDS:
             raise ScanInboxConfigError(
                 f"inbox '{ib_id}': stability_seconds must be >= {_MIN_STABILITY_SECONDS}"
             )
-        poll = int(entry.get("poll_interval_seconds", 60))
-        if poll < 5:
-            raise ScanInboxConfigError(f"inbox '{ib_id}': poll_interval_seconds must be >= 5")
+        try:
+            poll = int(entry.get("poll_interval_seconds", 60))
+        except (ValueError, TypeError):
+            raise ScanInboxConfigError(
+                f"inbox '{label}': poll_interval_seconds must be an integer"
+            ) from None
+        if poll < _MIN_POLL_SECONDS:
+            raise ScanInboxConfigError(f"inbox '{ib_id}': poll_interval_seconds must be >= {_MIN_POLL_SECONDS}")
 
         inboxes.append(
             ScanInbox(
@@ -118,3 +129,5 @@ def validate_inbox_paths(inbox: ScanInbox) -> None:
         raise ScanInboxConfigError("inbox_path and target_root must differ")
     if inbox_p.is_relative_to(target_p):
         raise ScanInboxConfigError("inbox_path must not be inside target_root (filed docs would be re-ingested)")
+    if target_p.is_relative_to(inbox_p):
+        raise ScanInboxConfigError("target_root must not be inside inbox_path (filed docs would be re-ingested)")
