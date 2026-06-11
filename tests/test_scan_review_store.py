@@ -69,3 +69,16 @@ def test_migration_creates_table_on_legacy_db(tmp_path):
     ).fetchone() is not None
     idx = {r[1] for r in db2.conn.execute("PRAGMA index_list(scan_review)").fetchall()}
     assert "idx_scan_review_inbox_status" in idx
+
+
+def test_user_group_external_ids_returns_group_slugs(tmp_path):
+    """user_group_external_ids returns the external_id of every group the user belongs to."""
+    db = SqliteStore(Path(tmp_path / "t.db"))
+    user_id = db.create_user("alice", "pw12345678", role="user")
+    # create_group is the real store API (idempotent, returns principal_id)
+    grp_pid = db.create_group("reviewers", "Reviewers")
+    db.add_user_to_group(user_id, grp_pid)
+    result = db.user_group_external_ids(user_id)
+    assert "reviewers" in result
+    # The 'public' group is added by create_user/_backfill_acl
+    assert "public" in result

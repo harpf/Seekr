@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 from datetime import UTC, datetime
@@ -8,6 +9,8 @@ from pathlib import Path
 
 from document_search.auth import hash_password, new_salt
 from document_search.models import ExtractionResult, FileFingerprint
+
+log = logging.getLogger(__name__)
 
 HISTORY_CAP = 20
 
@@ -810,10 +813,65 @@ class SqliteStore:
 
     # ── Scan ACL helpers ───────────────────────────────────────────────
 
+    def _ensure_user_principal(self, username: str) -> int | None:
+        """Lazy-create a 'user'-type principal for *username* without committing.
+
+        Returns the existing principal id if already present, creates and links
+        it if the username matches a known user row, or returns None for an
+        unknown username. Callers must commit after calling this method.
+        """
+        row = self.conn.execute(
+            "SELECT id FROM principals WHERE type='user' AND external_id=?",
+            (username,),
+        ).fetchone()
+        if row:
+            return row["id"]
+        u = self.conn.execute(
+            "SELECT id FROM users WHERE username=?", (username,)
+        ).fetchone()
+        if u is None:
+            return None
+        now = datetime.now(tz=UTC).isoformat()
+        self.conn.execute(
+            "INSERT OR IGNORE INTO principals(type, external_id, display_name, created_at) "
+            "VALUES('user', ?, ?, ?)",
+            (username, username, now),
+        )
+        self.conn.execute(
+            "UPDATE users SET principal_id=(SELECT id FROM principals "
+            "WHERE type='user' AND external_id=?) WHERE id=? AND principal_id IS NULL",
+            (username, u["id"]),
+        )
+        p = self.conn.execute(
+            "SELECT id FROM principals WHERE type='user' AND external_id=?",
+            (username,),
+        ).fetchone()
+        return p["id"] if p else None
+
+    def _ensure_group_principal(self, external_id: str, display_name: str) -> int:
+        """Lazy-create a 'group'-type principal without committing.
+
+        Inserts the group if it does not yet exist (INSERT OR IGNORE), then
+        re-selects and returns its id. Callers must commit after calling this
+        method.
+        """
+        now = datetime.now(tz=UTC).isoformat()
+        self.conn.execute(
+            "INSERT OR IGNORE INTO principals(type, external_id, display_name, created_at) "
+            "VALUES('group', ?, ?, ?)",
+            (external_id, display_name, now),
+        )
+        row = self.conn.execute(
+            "SELECT id FROM principals WHERE type='group' AND external_id=?",
+            (external_id,),
+        ).fetchone()
+        return int(row["id"])
+
     def principal_id_for(self, *, group_external_id: str | None = None,
                          user_external_id: str | None = None) -> int | None:
         """Resolve a principal id by group external_id or by username. Creates a
-        'user'-type principal on demand for a known username (mirrors backfill)."""
+        'user'-type principal on demand for a known username (mirrors backfill).
+        Commits only on the user path (when a new principal is created)."""
         if group_external_id:
             row = self.conn.execute(
                 "SELECT id FROM principals WHERE type='group' AND external_id=?",
@@ -821,37 +879,13 @@ class SqliteStore:
             ).fetchone()
             return row["id"] if row else None
         if user_external_id:
-            row = self.conn.execute(
-                "SELECT id FROM principals WHERE type='user' AND external_id=?",
-                (user_external_id,),
-            ).fetchone()
-            if row:
-                return row["id"]
-            u = self.conn.execute(
-                "SELECT id FROM users WHERE username=?", (user_external_id,)
-            ).fetchone()
-            if u is None:
-                return None
-            now = datetime.now(tz=UTC).isoformat()
-            self.conn.execute(
-                "INSERT OR IGNORE INTO principals(type, external_id, display_name, created_at) "
-                "VALUES('user', ?, ?, ?)",
-                (user_external_id, user_external_id, now),
-            )
-            self.conn.execute(
-                "UPDATE users SET principal_id=(SELECT id FROM principals "
-                "WHERE type='user' AND external_id=?) WHERE id=? AND principal_id IS NULL",
-                (user_external_id, u["id"]),
-            )
+            pid = self._ensure_user_principal(user_external_id)
             self.conn.commit()
-            p = self.conn.execute(
-                "SELECT id FROM principals WHERE type='user' AND external_id=?",
-                (user_external_id,),
-            ).fetchone()
-            return p["id"] if p else None
+            return pid
         return None
 
     def _public_principal_id(self) -> int | None:
+        """Return the id of the 'public' group principal, or None if not yet created."""
         row = self.conn.execute(
             "SELECT id FROM principals WHERE type='group' AND external_id='public'"
         ).fetchone()
@@ -861,9 +895,17 @@ class SqliteStore:
                      user_external_ids: list[str]) -> None:
         """Make a scanned doc private to reviewers: drop public-read, grant read to
         the configured reviewer groups + users. Explicit grants only — never rely on
-        absence of ACL rows (the backfill re-publicises empty docs). If NO reviewers
-        are given, a non-public sentinel row is still left so the doc is never
-        ACL-empty (otherwise _backfill_acl would re-grant public read)."""
+        absence of ACL rows (the backfill re-publicises empty docs).
+
+        All mutations — the public-read revoke, reviewer grants, and the
+        no-reviewers sentinel branch — are performed inside a single transaction
+        that commits exactly once at the end. The sentinel branch applies when NO
+        configured group or user external_id resolves to a known principal: in that
+        case a dedicated 'scan-admins' group (created on demand) receives read
+        access so the document's ACL is never empty (an empty ACL would cause
+        _backfill_acl to re-grant public read on the next store open). Unresolved
+        reviewer ids are logged at WARNING level and skipped.
+        """
         public_id = self._public_principal_id()
         if public_id is not None:
             self.conn.execute(
@@ -873,36 +915,40 @@ class SqliteStore:
         now = datetime.now(tz=UTC).isoformat()
         granted_any = False
         for gid in group_external_ids:
+            # Group path: plain SELECT only — no writes, no commit needed.
             pid = self.principal_id_for(group_external_id=gid)
-            if pid is not None:
-                self.conn.execute(
-                    "INSERT OR IGNORE INTO document_acl(document_id, principal_id, permission, granted_at) "
-                    "VALUES(?,?, 'read', ?)", (document_id, pid, now))
-                granted_any = True
-        for uid in user_external_ids:
-            pid = self.principal_id_for(user_external_id=uid)
-            if pid is not None:
-                self.conn.execute(
-                    "INSERT OR IGNORE INTO document_acl(document_id, principal_id, permission, granted_at) "
-                    "VALUES(?,?, 'read', ?)", (document_id, pid, now))
-                granted_any = True
-        if not granted_any:
-            # No reviewers resolved: leave an explicit owner/admin-only sentinel so
-            # the row count is never zero. Grant read to a dedicated 'scan-admins'
-            # group (created on demand) so the doc stays non-public but never empty.
-            sentinel = self.conn.execute(
-                "SELECT id FROM principals WHERE type='group' AND external_id='scan-admins'"
-            ).fetchone()
-            if sentinel is None:
-                self.conn.execute(
-                    "INSERT OR IGNORE INTO principals(type, external_id, display_name, created_at) "
-                    "VALUES('group', 'scan-admins', 'Scan Admins', ?)", (now,))
-                sentinel = self.conn.execute(
-                    "SELECT id FROM principals WHERE type='group' AND external_id='scan-admins'"
-                ).fetchone()
+            if pid is None:
+                log.warning(
+                    "scan inbox reviewer %r (%s) did not resolve to a principal; skipped",
+                    gid, "group",
+                )
+                continue
             self.conn.execute(
                 "INSERT OR IGNORE INTO document_acl(document_id, principal_id, permission, granted_at) "
-                "VALUES(?,?, 'read', ?)", (document_id, sentinel["id"], now))
+                "VALUES(?,?, 'read', ?)", (document_id, pid, now))
+            granted_any = True
+        for uid in user_external_ids:
+            # Use the no-commit helper directly so user-principal creation is
+            # folded into the same transaction as the ACL writes.
+            pid = self._ensure_user_principal(uid)
+            if pid is None:
+                log.warning(
+                    "scan inbox reviewer %r (%s) did not resolve to a principal; skipped",
+                    uid, "user",
+                )
+                continue
+            self.conn.execute(
+                "INSERT OR IGNORE INTO document_acl(document_id, principal_id, permission, granted_at) "
+                "VALUES(?,?, 'read', ?)", (document_id, pid, now))
+            granted_any = True
+        if not granted_any:
+            # No reviewers resolved: leave an explicit sentinel so the ACL row
+            # count is never zero. The 'scan-admins' group is created on demand
+            # without an intermediate commit.
+            sentinel_id = self._ensure_group_principal("scan-admins", "Scan Admins")
+            self.conn.execute(
+                "INSERT OR IGNORE INTO document_acl(document_id, principal_id, permission, granted_at) "
+                "VALUES(?,?, 'read', ?)", (document_id, sentinel_id, now))
         self.conn.commit()
 
     def restore_public_read(self, document_id: int) -> None:
