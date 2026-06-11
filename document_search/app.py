@@ -421,6 +421,7 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     worker = Worker(job_store, max_concurrent=4, poll_interval_s=1.0)
     app.state.job_store = job_store
     app.state.worker = worker
+    app.state.organizer = organizer
 
     _orig_handler = worker.handler
 
@@ -805,6 +806,97 @@ def create_app(db_path: str = "./document_index.db") -> FastAPI:
     @worker.handler("backup")
     def _handle_backup(payload: dict, progress_cb):
         return app.state.backup_service.create_backup()
+
+    def _existing_target_subfolders(target_root: str) -> list[str]:
+        root = Path(target_root)
+        if not root.is_dir():
+            return []
+        return sorted(p.name for p in root.iterdir() if p.is_dir())
+
+    def _inbox_by_id(inbox_id: str):
+        from document_search.services.scan_inbox_config import parse_scan_inboxes
+        raw = []
+        if config_path.exists():
+            try:
+                raw = json.loads(config_path.read_text(encoding="utf-8")).get("scan_inboxes", [])
+            except Exception:
+                raw = []
+        for ib in parse_scan_inboxes(raw):
+            if ib.id == inbox_id:
+                return ib
+        return None
+
+    @worker.handler("scan_ingest")
+    def _handle_scan_ingest(payload: dict, progress_cb):
+        from document_search.services.scan_extractor import extract_for_scan
+        from document_search.services.scan_review_store import ScanReviewStore
+
+        inbox_id = payload["inbox_id"]
+        staging_path = payload["staging_path"]
+        original_filename = payload["original_filename"]
+        db = SqliteStore(Path(db_path))
+        srs = ScanReviewStore(db)
+
+        inbox = _inbox_by_id(inbox_id)
+        if inbox is None:
+            srs.create_error(inbox_id=inbox_id, staging_path=staging_path,
+                             original_filename=original_filename,
+                             error_message=f"Unknown scan inbox '{inbox_id}'")
+            _obs.SCAN_INGESTED_TOTAL.labels(inbox=inbox_id, outcome="error").inc()
+            return {"status": "error", "reason": "unknown_inbox"}
+
+        cfg = load_config(config_path) if config_path.exists() else AppConfig()
+        languages = "+".join(cfg.ocr.languages) if cfg.ocr.languages else "deu+eng"
+        result = extract_for_scan(Path(staging_path), languages=languages)
+        if result.status == "error":
+            srs.create_error(inbox_id=inbox_id, staging_path=staging_path,
+                             original_filename=original_filename,
+                             error_message=result.error_message or "extraction failed")
+            _obs.SCAN_INGESTED_TOTAL.labels(inbox=inbox_id, outcome="error").inc()
+            return {"status": "error", "reason": "extraction"}
+
+        fp = fingerprint(Path(staging_path))
+        doc_id = db.upsert_document(fp, result, owner_principal_id=None)
+
+        candidates = _existing_target_subfolders(inbox.target_root)
+        extracted_text = " ".join(b.text[:500] for b in result.blocks[:6])
+        suggested_folder = None
+        suggested_tags: list[str] = []
+        reason = None
+        try:
+            sug = organizer.suggest(
+                file_path=Path(staging_path),
+                extracted_text=extracted_text,
+                tags=[],
+                metadata={"candidate_folders": ", ".join(candidates),
+                          "filename": original_filename},
+            )
+            if sug.suggested_subpath and sug.suggested_subpath in candidates:
+                suggested_folder = sug.suggested_subpath
+            suggested_tags = sug.suggested_tags or []
+            reason = sug.reason
+        except Exception:
+            log.warning("AI suggestion unavailable for scan %s; manual filing", staging_path, exc_info=True)
+
+        ai_decision_id = db.record_ai_decision(
+            kind="scan_filing",
+            model=getattr(organizer, "model", None),
+            prompt_sha256=hashlib.sha256(extracted_text.encode()).hexdigest(),
+            document_id=doc_id,
+            output={"suggested_folder": suggested_folder, "suggested_tags": suggested_tags,
+                    "reason": reason, "candidates": candidates},
+            applied=0,
+            user_id=None,
+        )
+        db.set_scan_acl(doc_id, group_external_ids=inbox.reviewers_groups,
+                        user_external_ids=inbox.reviewers_users)
+        srs.create_pending(
+            inbox_id=inbox_id, document_id=doc_id, staging_path=staging_path,
+            original_filename=original_filename, suggested_folder=suggested_folder,
+            suggested_tags=suggested_tags, ai_reasoning=reason, ai_decision_id=ai_decision_id,
+        )
+        _obs.SCAN_INGESTED_TOTAL.labels(inbox=inbox_id, outcome="pending").inc()
+        return {"status": "pending", "document_id": doc_id, "review_inbox": inbox_id}
 
     def store() -> SqliteStore:
         """Return a per-thread SqliteStore, creating it once on first use."""
