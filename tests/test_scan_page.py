@@ -1,9 +1,9 @@
 import pytest
-from fastapi.testclient import TestClient
-
-from document_search.app import create_app
 
 pytest.importorskip("fastapi")
+from fastapi.testclient import TestClient  # noqa: E402
+
+from document_search.app import create_app  # noqa: E402
 
 
 def test_scan_page_renders(tmp_path, monkeypatch):
