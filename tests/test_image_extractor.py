@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from document_search.extractors.plugins.image_extractor import (
     IMAGE_SUFFIXES,
     ImageTextExtractor,
@@ -17,7 +15,7 @@ def test_extract_uses_ocr_and_builds_one_page_block(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "document_search.extractors.plugins.image_extractor.ocr_image_bytes",
-        lambda blob, languages="eng+deu": "Rechnung Nr 42",
+        lambda blob, languages=None: "Rechnung Nr 42",
     )
     result = ImageTextExtractor().extract(img)
 
@@ -32,7 +30,7 @@ def test_extract_empty_ocr_yields_ok_with_no_blocks(tmp_path, monkeypatch):
     img.write_bytes(b"II*\x00 fake tiff")
     monkeypatch.setattr(
         "document_search.extractors.plugins.image_extractor.ocr_image_bytes",
-        lambda blob, languages="eng+deu": "   ",
+        lambda blob, languages=None: "   ",
     )
     result = ImageTextExtractor().extract(img)
     assert result.status == "ok"
@@ -44,3 +42,23 @@ def test_extract_read_error_returns_error_status(tmp_path):
     result = ImageTextExtractor().extract(missing)
     assert result.status == "error"
     assert result.error_message
+
+
+def test_ocr_image_file_forwards_language(tmp_path, monkeypatch):
+    img = tmp_path / "doc.png"
+    img.write_bytes(b"\x89PNG fake bytes")
+
+    captured = {}
+
+    def fake_ocr_image_bytes(blob, languages=None):
+        captured["languages"] = languages
+        return "  Hallo Welt  "
+
+    monkeypatch.setattr(
+        "document_search.extractors.plugins.image_extractor.ocr_image_bytes",
+        fake_ocr_image_bytes,
+    )
+    result = ocr_image_file(img, languages="deu")
+
+    assert captured["languages"] == "deu"
+    assert result == "Hallo Welt"

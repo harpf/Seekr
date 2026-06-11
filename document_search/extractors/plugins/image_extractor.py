@@ -5,8 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from document_search.extractors.base import TextExtractor
-from document_search.models import ContentBlock, ExtractionResult
+from document_search.extractors import ContentBlock, ExtractionResult, TextExtractor
 from document_search.services.ocr_service import ocr_image_bytes, resolve_ocr_language
 
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
@@ -24,6 +23,8 @@ class ImageTextExtractor(TextExtractor):
     def extract(self, file_path: Path) -> ExtractionResult:
         try:
             text = ocr_image_file(file_path)
+        # ocr_image_bytes already swallows OCR/Pillow errors and returns ""; only
+        # the file read inside ocr_image_file (path.read_bytes()) can raise here.
         except OSError as exc:
             return ExtractionResult(
                 file_path=file_path, status="error", error_message=str(exc)
@@ -31,7 +32,12 @@ class ImageTextExtractor(TextExtractor):
         blocks = []
         if text:
             blocks.append(
-                ContentBlock("ocr_page", 1, text, self.__class__.__name__, {})
+                ContentBlock(
+                    block_type="ocr_page",
+                    block_number=1,
+                    text=text,
+                    extractor=self.__class__.__name__,
+                )
             )
         return ExtractionResult(file_path=file_path, status="ok", blocks=blocks)
 
